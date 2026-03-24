@@ -40,6 +40,8 @@ setup(
         "candle_dvm/device_bin.pyx",
         "candle_dvm/isa.pyx",
         "candle_dvm/code.pyx",
+        "candle_dvm/ops.pyx",
+        "candle_dvm/pass_.pyx",
         system_ext,
     ]),
     extras_require={"test": ["pytest"]},
