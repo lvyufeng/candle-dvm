@@ -1,0 +1,11 @@
+// target=0, block_dim=1, ffts_addr=0
+vmain.aiv(body_tile=1, tail_tile_diff=0) {
+  0: load.u8.4096x1 0x200, 0 //tile_stride(4096), pad_size(0), iter_tail(4096)
+      {load, simd_load_sync(wait, 0) }
+  1: load.u8.4096x1 0x1200, 0 //tile_stride(4096), pad_size(0), iter_tail(4096)
+      {load, load_simd_sync(set, 0) }
+  2: Add.fp32.1024 0x2200, 0x200, 0x1200
+      {simd, load_simd_sync(wait, 0), store_simd_sync(wait, 0), simd_store_sync(set, 0), simd_load_sync(set, 0) }
+  3: store.u8.4096x1 0, 0x2200 //tile_stride(4096), iter_tail(4096), pad_size(0)
+      {store, simd_store_sync(wait, 0), store_simd_sync(set, 0) }
+}
