@@ -1,0 +1,19 @@
+# Worktrees
+.worktrees/
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Cython generated
+*.c
+!candle_dvm/data/
+
+# IDE
+.vscode/
+.idea/
