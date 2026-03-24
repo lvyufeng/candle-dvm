@@ -43,6 +43,7 @@ setup(
         "candle_dvm/ops.pyx",
         "candle_dvm/pass_.pyx",
         "candle_dvm/kernel.pyx",
+        "candle_dvm/api.pyx",
         system_ext,
     ]),
     extras_require={"test": ["pytest"]},
