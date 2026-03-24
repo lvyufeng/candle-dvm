@@ -101,7 +101,7 @@ class TestNDLoad:
             code.free()
 
     def test_emit_uses_v_load_opcode(self):
-        """The head word's ID field must contain V_LOAD."""
+        """The head word's ID field must contain ACCESS_FUNC_OFFSET[V_LOAD]."""
         load = NDLoad(io_index=0, shape=(4, 8), dtype=DTYPE_F32)
         load.normalize()
         load.xbuf = 0
@@ -112,7 +112,7 @@ class TestNDLoad:
             load.emit(code, relocs)
             head = code.read_u64_at(0)
             opcode = (head >> isa.V_HEAD_ID_OFFSET) & isa.V_HEAD_ID_MASK
-            assert opcode == isa.V_LOAD
+            assert opcode == isa.ACCESS_FUNC_OFFSET[isa.V_LOAD]
         finally:
             code.free()
 
@@ -194,7 +194,7 @@ class TestNDStore:
             store.emit(code, relocs)
             head = code.read_u64_at(0)
             opcode = (head >> isa.V_HEAD_ID_OFFSET) & isa.V_HEAD_ID_MASK
-            assert opcode == isa.V_STORE
+            assert opcode == isa.ACCESS_FUNC_OFFSET[isa.V_STORE]
         finally:
             code.free()
 
@@ -268,7 +268,7 @@ class TestBinaryOp:
             code.free()
 
     def test_emit_head_uses_v_add_opcode(self):
-        """For fp32 add, the head word ID must be V_ADD (=18)."""
+        """For fp32 add, the head word ID must be SIMD_FUNC_OFFSET[V_ADD]."""
         lhs, rhs = self._make_loads()
         op = BinaryOp(BIN_ADD, lhs, rhs)
         op.normalize()
@@ -280,7 +280,7 @@ class TestBinaryOp:
             op.emit(code, relocs)
             head = code.read_u64_at(0)
             opcode = (head >> isa.V_HEAD_ID_OFFSET) & isa.V_HEAD_ID_MASK
-            assert opcode == isa.V_ADD
+            assert opcode == isa.SIMD_FUNC_OFFSET[isa.V_ADD]
         finally:
             code.free()
 

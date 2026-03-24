@@ -138,3 +138,18 @@ cdef class Kernel:
             One relocation per IO operand (loads + stores).
         """
         return self._kernel.relocs
+
+    @property
+    def code(self):
+        """Return the compiled Code object from the underlying kernel."""
+        return self._kernel.code
+
+    @property
+    def inputs(self):
+        """Return the list of input NDLoad nodes."""
+        return list(self._inputs)
+
+    @property
+    def outputs(self):
+        """Return the list of output NDStore nodes."""
+        return list(self._outputs)

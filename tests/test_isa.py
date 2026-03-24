@@ -92,7 +92,8 @@ def test_mask_constants():
 
 def test_make_acc_head_packs_fields():
     head = isa.make_acc_head(isa.V_LOAD, 3, 2)
-    expected = (isa.V_LOAD << isa.V_HEAD_ID_OFFSET) | \
+    hw_id = isa.ACCESS_FUNC_OFFSET[isa.V_LOAD]
+    expected = (hw_id << isa.V_HEAD_ID_OFFSET) | \
                (3 << isa.V_M_HEAD_EXT_OFFSET) | \
                (2 << isa.V_M_HEAD_SIZE_OFFSET)
     assert head == expected
@@ -100,13 +101,16 @@ def test_make_acc_head_packs_fields():
 
 def test_make_acc_head_zero():
     head = isa.make_acc_head(0, 0, 0)
-    assert head == 0
+    hw_id = isa.ACCESS_FUNC_OFFSET[0]
+    expected = hw_id << isa.V_HEAD_ID_OFFSET
+    assert head == expected
 
 
 def test_make_acc_head_large_ext():
     head = isa.make_acc_head(isa.V_STORE, 0x3FFFFFFFF, 0xF)
     # ext is 34 bits, size is 4 bits for load/store
-    id_part = isa.V_STORE << isa.V_HEAD_ID_OFFSET
+    hw_id = isa.ACCESS_FUNC_OFFSET[isa.V_STORE]
+    id_part = hw_id << isa.V_HEAD_ID_OFFSET
     ext_part = 0x3FFFFFFFF << isa.V_M_HEAD_EXT_OFFSET
     size_part = 0xF << isa.V_M_HEAD_SIZE_OFFSET
     assert head == (id_part | ext_part | size_part)
@@ -118,7 +122,8 @@ def test_make_acc_head_large_ext():
 
 def test_make_simd_head_packs_fields():
     head = isa.make_simd_head(isa.V_ADD, 5, 2)
-    expected = (isa.V_ADD << isa.V_HEAD_ID_OFFSET) | \
+    hw_id = isa.SIMD_FUNC_OFFSET[isa.V_ADD]
+    expected = (hw_id << isa.V_HEAD_ID_OFFSET) | \
                (5 << isa.V_HEAD_EXT_OFFSET) | \
                (2 << isa.V_HEAD_SIZE_OFFSET) | \
                (1 << isa.V_HEAD_SIMD_FLAG_OFFSET)
@@ -132,5 +137,7 @@ def test_make_simd_head_has_simd_flag_set():
 
 def test_make_simd_head_zero_opcode():
     head = isa.make_simd_head(0, 0, 1)
-    expected = (1 << isa.V_HEAD_SIZE_OFFSET) | (1 << isa.V_HEAD_SIMD_FLAG_OFFSET)
+    hw_id = isa.SIMD_FUNC_OFFSET[0]
+    expected = (hw_id << isa.V_HEAD_ID_OFFSET) | \
+               (1 << isa.V_HEAD_SIZE_OFFSET) | (1 << isa.V_HEAD_SIMD_FLAG_OFFSET)
     assert head == expected

@@ -26,6 +26,15 @@ cdef class NDObject:
     cdef public int index
     cdef public int xbuf
     cdef public bint normalized
+    # Sync flags for pipeline synchronization
+    cdef public int sync_set
+    cdef public int sync_wait
+    cdef public int sync_set_event
+    cdef public int sync_wait_event
+    cdef public int sync_back_set
+    cdef public int sync_back_wait
+    cdef public int sync_b_set_event
+    cdef public int sync_b_wait_event
 
 
 # ---------------------------------------------------------------------------

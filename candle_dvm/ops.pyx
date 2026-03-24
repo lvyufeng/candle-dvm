@@ -20,8 +20,20 @@ from candle_dvm.isa import (
     V_HEAD_EXT_OFFSET,
     V_HEAD_SIZE_OFFSET,
     V_HEAD_SIMD_FLAG_OFFSET,
+    V_HEAD_SET_FLAG_OFFSET,
+    V_HEAD_WAIT_FLAG_OFFSET,
+    V_HEAD_BACK_SET_OFFSET,
+    V_HEAD_BACK_WAIT_OFFSET,
+    V_HEAD_SET_EVENT_OFFSET,
+    V_HEAD_WAIT_EVENT_OFFSET,
+    V_HEAD_B_SET_EVENT_OFFSET,
+    V_HEAD_B_WAIT_EVENT_OFFSET,
     V_M_HEAD_EXT_OFFSET,
     V_M_HEAD_SIZE_OFFSET,
+    V_M_HEAD_SET_FLAG_OFFSET,
+    V_M_HEAD_WAIT_FLAG_OFFSET,
+    V_M_HEAD_SET_EVENT_OFFSET,
+    V_M_HEAD_WAIT_EVENT_OFFSET,
     V_X_MASK,
     V_C_X_BITS,
 )
@@ -137,6 +149,16 @@ cdef class NDObject:
         self.index = -1
         self.xbuf = 0
         self.normalized = False
+        # Sync flags for pipeline synchronization (set by codegen)
+        self.sync_set = 0       # set flag
+        self.sync_wait = 0      # wait flag
+        self.sync_set_event = 0
+        self.sync_wait_event = 0
+        # Additional sync flags for SIMD instructions
+        self.sync_back_set = 0
+        self.sync_back_wait = 0
+        self.sync_b_set_event = 0
+        self.sync_b_wait_event = 0
 
     def normalize(self):
         """Re-infer shape from inputs. Override in subclasses."""
@@ -254,9 +276,15 @@ cdef class NDLoad(NDAccess):
 
         # Encode vLoad
         # pc[0] = vMakeAccHead(V_LOAD, tile_stride<<13 | compact_xn, size)
+        #         + sync flags from codegen
         cdef unsigned long long c_xn = _compact_x(<unsigned long long>self.xbuf)
         cdef unsigned long long ext = (tile_stride_bytes << 13) | c_xn
         cdef unsigned long long head = make_acc_head(V_LOAD, ext, insn_size)
+        # Apply sync flags (acc head format)
+        head |= (<unsigned long long>self.sync_set << V_M_HEAD_SET_FLAG_OFFSET)
+        head |= (<unsigned long long>self.sync_wait << V_M_HEAD_WAIT_FLAG_OFFSET)
+        head |= (<unsigned long long>(self.sync_set_event & 0x7) << V_M_HEAD_SET_EVENT_OFFSET)
+        head |= (<unsigned long long>(self.sync_wait_event & 0x7) << V_M_HEAD_WAIT_EVENT_OFFSET)
         code.append_u64(head)
 
         # pc[1] = from (GM address placeholder -- to be patched via reloc)
@@ -352,9 +380,15 @@ cdef class NDStore(NDAccess):
 
         # Encode vStore
         # pc[0] = vMakeAccHead(V_STORE, tile_stride<<13 | compact_xn, size)
+        #         + sync flags from codegen
         cdef unsigned long long c_xn = _compact_x(<unsigned long long>src.xbuf)
         cdef unsigned long long ext = (tile_stride_bytes << 13) | c_xn
         cdef unsigned long long head = make_acc_head(V_STORE, ext, insn_size)
+        # Apply sync flags (acc head format)
+        head |= (<unsigned long long>self.sync_set << V_M_HEAD_SET_FLAG_OFFSET)
+        head |= (<unsigned long long>self.sync_wait << V_M_HEAD_WAIT_FLAG_OFFSET)
+        head |= (<unsigned long long>(self.sync_set_event & 0x7) << V_M_HEAD_SET_EVENT_OFFSET)
+        head |= (<unsigned long long>(self.sync_wait_event & 0x7) << V_M_HEAD_WAIT_EVENT_OFFSET)
         code.append_u64(head)
 
         # pc[1] = round_rank<<60 | pad_size<<52 | iter_size<<34 |
@@ -475,8 +509,17 @@ cdef class BinaryOp(FlexOp):
         cdef unsigned long long xm = <unsigned long long>self.rhs.xbuf
         cdef int insn_size = 2
 
-        # pc[0] = vMakeSimdHead(id, xn, 2)
+        # pc[0] = vMakeSimdHead(id, xn, 2) + sync flags from codegen
         cdef unsigned long long head = make_simd_head(insn_id, xn, insn_size)
+        # Apply sync flags (simd head format)
+        head |= (<unsigned long long>self.sync_set << V_HEAD_SET_FLAG_OFFSET)
+        head |= (<unsigned long long>self.sync_wait << V_HEAD_WAIT_FLAG_OFFSET)
+        head |= (<unsigned long long>self.sync_back_set << V_HEAD_BACK_SET_OFFSET)
+        head |= (<unsigned long long>self.sync_back_wait << V_HEAD_BACK_WAIT_OFFSET)
+        head |= (<unsigned long long>(self.sync_set_event & 0x7) << V_HEAD_SET_EVENT_OFFSET)
+        head |= (<unsigned long long>(self.sync_wait_event & 0x7) << V_HEAD_WAIT_EVENT_OFFSET)
+        head |= (<unsigned long long>(self.sync_b_set_event & 0x7) << V_HEAD_B_SET_EVENT_OFFSET)
+        head |= (<unsigned long long>(self.sync_b_wait_event & 0x7) << V_HEAD_B_WAIT_EVENT_OFFSET)
         code.append_u64(head)
 
         # pc[1] = count << 48 | xd << 18 | xm

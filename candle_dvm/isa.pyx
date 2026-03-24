@@ -205,6 +205,69 @@ V_ENTRY_V_TILE_BODY_BITS   = 24
 
 
 # ===================================================================
+# Function offset tables for g_vkernel_c220.bin
+# Maps raw opcode enum values to code addresses within the binary.
+# The ID field in the instruction head contains the actual function
+# address, NOT an index -- it is used by the VM to jump directly
+# to the handler code for each instruction.
+# Source: dvm/vm.cc g_access_func_offset_c220[] / g_simd_func_offset_c220[]
+# ===================================================================
+
+# Access function offset table: raw_opcode -> code address in binary
+ACCESS_FUNC_OFFSET = [
+    0x5954,  # V_LOAD = 0
+    0x5b18,  # V_LOAD_DUMMY = 1
+    0x5b60,  # V_LOAD_VIEW = 2
+    0x5ea8,  # V_SLOAD = 3
+    0x0000,  # V_LOAD_CC = 4 (not in c220)
+    0x61ec,  # V_MULTI_LOAD = 5
+    0x6554,  # V_PINGPONG_LOAD = 6
+    0x67a0,  # V_PINGPONG_PEER_LOAD = 7
+    0x6c28,  # V_PEER_LOAD = 8
+    0x6ecc,  # V_PEER_LOAD_MIX = 9
+    0x7150,  # V_STORE = 10
+    0x7334,  # V_STORE_ATOMIC = 11
+    0x7634,  # V_STORE_COND = 12
+    0x77f0,  # V_SSTORE = 13
+    0x7bac,  # V_SLICE_STORE = 14
+    0x7de0,  # V_STORE_AG = 15
+    0x7f18,  # V_STORE_RS = 16
+    0x8080,  # V_PEER_STORE = 17
+    0x81c4,  # V_PEER_STORE_MIX = 18
+    0x0000,  # V_ACCESS_NONE = 19
+]
+
+# SIMD function offset table: raw_opcode -> code address in binary
+SIMD_FUNC_OFFSET = [
+    0x831c,  # V_COPY = 0
+    0x0000,  # V_COPY_CUBE_TILE = 1 (not in c220)
+    0x8350,  # V_NOP = 2
+    0x85fc,  # V_BROADCAST_Y = 3
+    0x870c,  # V_BROADCAST_S = 4
+    0x874c,  # V_SQRT = 5
+    0x878c,  # V_ABS = 6
+    0x87cc,  # V_LOG = 7
+    0x880c,  # V_EXP = 8
+    0x884c,  # V_ROUND = 9
+    0x888c,  # V_FLOOR = 10
+    0x88cc,  # V_CEIL = 11
+    0x890c,  # V_TRUNC = 12
+    0x894c,  # V_ADDS = 13
+    0x8998,  # V_MULS = 14
+    0xd7ec,  # V_DIVS = 15
+    0xd700,  # V_SDIV = 16
+    0x8f54,  # V_CMPS = 17
+    0x89e4,  # V_ADD = 18
+    0x8a30,  # V_SUB = 19
+    0x8a7c,  # V_MUL = 20
+    0x8ac8,  # V_DIV = 21
+    0x8b14,  # V_MIN = 22
+    0x8b60,  # V_MAX = 23
+    0x8bac,  # V_CMP = 24
+]
+
+
+# ===================================================================
 # Encode helpers
 # ===================================================================
 
@@ -215,9 +278,9 @@ cpdef unsigned long long make_acc_head(
 ):
     """Build a load/store instruction head word.
 
-    Matches ``vMakeAccHead`` from isa.h but uses the raw *opcode* as the
-    ID field (the ``g_system.g_access_func_offset_`` lookup will be added
-    in a later phase).
+    Matches ``vMakeAccHead`` from isa.h.  Applies the
+    ``ACCESS_FUNC_OFFSET`` lookup to map the raw opcode enum value
+    to the binary dispatch table index used by g_vkernel_c220.bin.
 
     Parameters
     ----------
@@ -233,10 +296,11 @@ cpdef unsigned long long make_acc_head(
     int
         Packed 64-bit head word.
     """
+    cdef unsigned long long hw_id = <unsigned long long>ACCESS_FUNC_OFFSET[opcode]
     return (
         (ext << V_M_HEAD_EXT_OFFSET)
         | (size << V_M_HEAD_SIZE_OFFSET)
-        | (opcode << V_HEAD_ID_OFFSET)
+        | (hw_id << V_HEAD_ID_OFFSET)
     )
 
 
@@ -247,9 +311,9 @@ cpdef unsigned long long make_simd_head(
 ):
     """Build a SIMD instruction head word.
 
-    Matches ``vMakeSimdHead`` from isa.h but uses the raw *opcode* as the
-    ID field (the ``g_system.g_simd_func_offset_`` lookup will be added
-    in a later phase).
+    Matches ``vMakeSimdHead`` from isa.h.  Applies the
+    ``SIMD_FUNC_OFFSET`` lookup to map the raw opcode enum value
+    to the binary dispatch table index used by g_vkernel_c220.bin.
 
     Parameters
     ----------
@@ -265,9 +329,10 @@ cpdef unsigned long long make_simd_head(
     int
         Packed 64-bit head word.
     """
+    cdef unsigned long long hw_id = <unsigned long long>SIMD_FUNC_OFFSET[opcode]
     return (
         (ext << V_HEAD_EXT_OFFSET)
         | (size << V_HEAD_SIZE_OFFSET)
-        | (opcode << V_HEAD_ID_OFFSET)
+        | (hw_id << V_HEAD_ID_OFFSET)
         | (1 << V_HEAD_SIMD_FLAG_OFFSET)
     )

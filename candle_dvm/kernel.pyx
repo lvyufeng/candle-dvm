@@ -26,6 +26,10 @@ from candle_dvm.pass_ import run_passes
 # (tests/fixtures/upstream_add_trace.txt first line: block_dim=1)
 PHASE1_BLOCK_DIM_910B = 1
 
+# xbuf base offset: first 512 bytes (0x200) of local memory are reserved
+# on 910B for hardware use (sync flags, stack, etc.)
+DEF XBUF_BASE_OFFSET = 0x200
+
 # ITEM_SIZE lookup (bytes per element, indexed by DataType)
 cdef int _ITEM_SIZE[5]
 _ITEM_SIZE[0] = 1   # kBool
@@ -197,7 +201,6 @@ cdef class VKernelS(VectorKernel):
         cdef list relocs = []
         cdef list objects = self.objects
         cdef NDObject obj
-        cdef int next_slot = 0
         cdef long long slot_sz
 
         # Step 4-5: reserve head words (ffts_addr=0, entry=0)
@@ -205,20 +208,68 @@ cdef class VKernelS(VectorKernel):
         code.append_u64(0)  # word 1: entry placeholder
 
         # Step 6: assign xbuf slots (monotonic allocation)
+        # xbuf addresses start at XBUF_BASE_OFFSET (0x200) on 910B
+        cdef long long xbuf_cursor = XBUF_BASE_OFFSET
         for obj in objects:
             if obj.obj_id == _OBJ_LOAD:
                 # NDLoad: allocate a new slot
                 slot_sz = _slot_size(obj.shape_ref, obj.type_id)
-                obj.xbuf = <int>(next_slot * slot_sz)
-                next_slot += 1
+                obj.xbuf = <int>xbuf_cursor
+                xbuf_cursor += slot_sz
             elif obj.obj_id == _OBJ_STORE:
                 # NDStore: share source's xbuf (no new allocation)
                 obj.xbuf = obj.lhs.xbuf
             else:
                 # BinaryOp / other SIMD ops: allocate a new slot
                 slot_sz = _slot_size(obj.shape_ref, obj.type_id)
-                obj.xbuf = <int>(next_slot * slot_sz)
-                next_slot += 1
+                obj.xbuf = <int>xbuf_cursor
+                xbuf_cursor += slot_sz
+
+        # Step 6b: assign sync flags for pipeline synchronization
+        # Pattern for load-...-simd-store graphs (phase 1):
+        #   First load:  wait simd_load_sync event 0
+        #   Last load:   set load_simd_sync event 0
+        #   SIMD ops:    wait load_simd_sync + wait store_simd_sync,
+        #                set simd_store_sync + set simd_load_sync
+        #   Store:       wait simd_store_sync, set store_simd_sync
+        cdef list loads = []
+        cdef list simd_ops = []
+        cdef list stores = []
+        cdef NDObject sync_obj
+        for sync_obj in objects:
+            if sync_obj.obj_id == _OBJ_LOAD:
+                loads.append(sync_obj)
+            elif sync_obj.obj_id == _OBJ_STORE:
+                stores.append(sync_obj)
+            else:
+                simd_ops.append(sync_obj)
+
+        if loads:
+            # First load: wait simd_load_sync
+            (<NDObject>loads[0]).sync_wait = 1
+            (<NDObject>loads[0]).sync_wait_event = 0
+            # Last load: set load_simd_sync
+            (<NDObject>loads[-1]).sync_set = 1
+            (<NDObject>loads[-1]).sync_set_event = 0
+
+        for sync_obj in simd_ops:
+            # SIMD ops: wait load_simd_sync + wait store_simd_sync
+            sync_obj.sync_wait = 1
+            sync_obj.sync_wait_event = 0
+            sync_obj.sync_back_wait = 1
+            sync_obj.sync_b_wait_event = 0
+            # Set simd_store_sync + simd_load_sync
+            sync_obj.sync_set = 1
+            sync_obj.sync_set_event = 0
+            sync_obj.sync_back_set = 1
+            sync_obj.sync_b_set_event = 0
+
+        for sync_obj in stores:
+            # Store: wait simd_store_sync, set store_simd_sync
+            sync_obj.sync_wait = 1
+            sync_obj.sync_wait_event = 0
+            sync_obj.sync_set = 1
+            sync_obj.sync_set_event = 0
 
         # Step 7: emit each op into the code buffer
         for obj in objects:
@@ -227,21 +278,11 @@ cdef class VKernelS(VectorKernel):
         # Step 8: append terminating zero instruction
         code.append_u64(0)
 
-        # Step 9: compute tile_num from the first object with a non-empty shape.
-        # Formula: product of shape[:-1] if ndim > 1, else 1.
-        # e.g. (32, 32) -> 32; (1024,) -> 1; (2, 3, 4) -> 6
+        # Step 9: compute tile_num.
+        # Phase 1: all data fits in local memory (no tiling needed),
+        # so tile_num = 1 for contiguous tensors on 910B.
+        # Multi-tile support will be added in a later phase.
         cdef long long _tile_num = 1
-        cdef tuple _shape
-        for obj in objects:
-            _shape = obj.shape_ref
-            if _shape is not None and len(_shape) > 0:
-                if len(_shape) > 1:
-                    _tile_num = 1
-                    for i in range(len(_shape) - 1):
-                        _tile_num *= <long long>_shape[i]
-                else:
-                    _tile_num = 1
-                break
         self.tile_num = _tile_num
 
         # Step 10-11: compute data_size and finalize entry

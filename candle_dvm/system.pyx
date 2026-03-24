@@ -655,7 +655,7 @@ cdef class System:
                          uintptr_t extern_ws, uintptr_t stream) except *:
         """Launch via RT path."""
         cdef rtKernelLaunchFunc launch_fn = <rtKernelLaunchFunc>self._kernel_launch_func
-        cdef void *func_handle = <void *>(<uintptr_t><void *>self + target_idx)
+        cdef void *func_handle = self._func_handles[target_idx]
         cdef int32_t err
         cdef aclError acl_err
         cdef uint64_t rt_args[2]

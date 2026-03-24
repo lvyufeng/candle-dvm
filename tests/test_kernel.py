@@ -136,12 +136,14 @@ class TestVKernelSCodegen:
             )
 
     def test_tile_num_computed_from_shape(self):
-        """tile_num must equal product of shape[:-1] for ndim > 1.
+        """tile_num must be 1 for small tensors that fit in local memory.
 
-        For shape (32, 32): tile_num = 32.
+        Phase 1: no tiling needed for (32, 32) fp32 = 4096 bytes,
+        which fits in 910B local memory (192KB - 512B).
+        The upstream trace confirms body_tile=1, tail_tile_diff=0.
         """
         k = _build_add_kernel()  # shape (32, 32)
-        assert k.debug_header()["tile_num"] == 32, (
-            f"expected tile_num=32 for shape (32, 32), "
+        assert k.debug_header()["tile_num"] == 1, (
+            f"expected tile_num=1 for shape (32, 32) in phase 1, "
             f"got {k.debug_header()['tile_num']}"
         )
