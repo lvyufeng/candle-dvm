@@ -1,9 +1,14 @@
-from setuptools import setup, Extension
+from setuptools import setup, find_packages
 from Cython.Build import cythonize
 
-ext_modules = cythonize([], compiler_directives={"language_level": "3"})
-
 setup(
-    packages=["candle_dvm"],
-    ext_modules=ext_modules,
+    name="candle_dvm",
+    packages=["candle_dvm", "candle_dvm.data"],
+    package_data={
+        "candle_dvm.data": ["g_vkernel_c220.bin", "README.md"],
+    },
+    ext_modules=cythonize([
+        "candle_dvm/device_bin.pyx",
+    ]),
+    extras_require={"test": ["pytest"]},
 )
