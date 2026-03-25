@@ -110,7 +110,7 @@ cdef class Kernel:
         self._output_count += 1
         return node
 
-    cpdef object _binary_dispatch(self, int bin_op, object a, object b):
+    cdef object _binary_dispatch(self, int bin_op, object a, object b):
         """Route a binary op to BinaryOp or BinaryScalarOp as appropriate.
 
         Parameters

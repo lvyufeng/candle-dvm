@@ -171,3 +171,8 @@ def test_kernel_both_scalars_raises():
     k = Kernel()
     with pytest.raises(TypeError):
         k.add(1.0, 2.0)
+
+
+def test_kernel_does_not_expose_binary_dispatch():
+    k = Kernel()
+    assert not hasattr(k, "_binary_dispatch")
