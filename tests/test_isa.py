@@ -313,3 +313,17 @@ class TestBinaryOpcodeTable:
     def test_table_size(self):
         """6 binary ops x 2 dtypes (f32 + fp16) = 12 entries."""
         assert len(isa.BINARY_OPCODE_TABLE) == 12
+
+
+# ---------------------------------------------------------------------------
+# encode_unary  -- vUnary 2-word instruction encoding
+# ---------------------------------------------------------------------------
+
+def test_encode_unary_fp32_matches_vUnary_layout():
+    words = isa.encode_unary(opcode=isa.V_SQRT, xd=0x200, xn=0x400, count=32)
+    assert len(words) == 2
+    # head ext field should contain xd (not xn) for vUnary
+    ext_field = (words[0] >> isa.V_HEAD_EXT_OFFSET) & 0x3FFFFFF
+    assert ext_field == 0x200
+    assert ((words[0] >> isa.V_HEAD_ID_OFFSET) & 0xFFFF) == isa.SIMD_FUNC_OFFSET[isa.V_SQRT]
+    assert words[1] == (0x400 << 32) | 32

@@ -423,3 +423,39 @@ cpdef unsigned long long make_simd_head(
         | (hw_id << V_HEAD_ID_OFFSET)
         | (1 << V_HEAD_SIMD_FLAG_OFFSET)
     )
+
+
+cpdef list encode_unary(
+    unsigned long long opcode,
+    unsigned long long xd,
+    unsigned long long xn,
+    unsigned long long count,
+):
+    """Encode a vUnary 2-word SIMD instruction.
+
+    Matches the upstream vUnary layout from isa.h:
+      pc[0] = make_simd_head(opcode, xd, 2)
+      pc[1] = xn << 32 | count
+
+    Note: for vUnary the ext field carries **xd** (the destination),
+    unlike vBinary where ext = xn.
+
+    Parameters
+    ----------
+    opcode : int
+        SIMD opcode (e.g. ``V_SQRT``).
+    xd : int
+        Destination register address (26 bits, goes into ext field).
+    xn : int
+        Source register address (upper 32 bits of word 1).
+    count : int
+        Element count (lower 32 bits of word 1).
+
+    Returns
+    -------
+    list
+        Two-element list of uint64 values ``[head, payload]``.
+    """
+    cdef unsigned long long head = make_simd_head(opcode, xd, 2)
+    cdef unsigned long long payload = (xn << 32) | count
+    return [head, payload]

@@ -15,3 +15,10 @@ cpdef unsigned long long make_simd_head(
     unsigned long long ext,
     unsigned long long size,
 )
+
+cpdef list encode_unary(
+    unsigned long long opcode,
+    unsigned long long xd,
+    unsigned long long xn,
+    unsigned long long count,
+)
