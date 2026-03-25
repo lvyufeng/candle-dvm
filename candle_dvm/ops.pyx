@@ -16,6 +16,17 @@ from candle_dvm.isa import (
     V_LOAD,
     V_STORE,
     V_ADD,
+    V_ADD_FP16,
+    V_SUB,
+    V_SUB_FP16,
+    V_MUL,
+    V_MUL_FP16,
+    V_DIV,
+    V_DIV_FP16,
+    V_MAX,
+    V_MAX_FP16,
+    V_MIN,
+    V_MIN_FP16,
     V_HEAD_ID_OFFSET,
     V_HEAD_EXT_OFFSET,
     V_HEAD_SIZE_OFFSET,
@@ -80,8 +91,13 @@ UNARY_FLOOR = 8
 UNARY_CEIL = 9
 UNARY_TRUNC = 10
 
-# BinaryType  (dvm.h) -- kAdd is index 6
+# BinaryType  (dvm.h)
 BIN_ADD = 6
+BIN_SUB = 7
+BIN_MUL = 8
+BIN_DIV = 9
+BIN_MAX = 11
+BIN_MIN = 12
 
 # ObjectType  (ops.h)
 OBJ_LOAD_DUMMY = 0
@@ -98,11 +114,27 @@ OBJ_BINARY     = 14
 # vStore: RELOC_OFFSET=2, ROUND_OFFSET=3
 # vBinary: 2 words, no reloc
 
-# binary_id_list lookup for phase 1:
-# binary_id_list[BIN_ADD].ids[DTYPE_F32] = V_ADD (=18)
+# binary_id_list lookup: (BinaryType, DataType) -> vSimdInsnID
 cdef dict _BINARY_ID_TABLE
 _BINARY_ID_TABLE = {
-    (BIN_ADD, DTYPE_F32): V_ADD,
+    # add
+    (BIN_ADD, DTYPE_F32):  V_ADD,
+    (BIN_ADD, DTYPE_FP16): V_ADD_FP16,
+    # sub
+    (BIN_SUB, DTYPE_F32):  V_SUB,
+    (BIN_SUB, DTYPE_FP16): V_SUB_FP16,
+    # mul
+    (BIN_MUL, DTYPE_F32):  V_MUL,
+    (BIN_MUL, DTYPE_FP16): V_MUL_FP16,
+    # div
+    (BIN_DIV, DTYPE_F32):  V_DIV,
+    (BIN_DIV, DTYPE_FP16): V_DIV_FP16,
+    # max
+    (BIN_MAX, DTYPE_F32):  V_MAX,
+    (BIN_MAX, DTYPE_FP16): V_MAX_FP16,
+    # min
+    (BIN_MIN, DTYPE_F32):  V_MIN,
+    (BIN_MIN, DTYPE_FP16): V_MIN_FP16,
 }
 
 
@@ -434,7 +466,7 @@ cdef class FlexOp(NDObject):
 
 
 # ===================================================================
-# BinaryOp -- element-wise binary (phase 1: add only)
+# BinaryOp -- element-wise binary
 # ===================================================================
 
 cdef class BinaryOp(FlexOp):
