@@ -29,3 +29,11 @@ cpdef list encode_unary(
     unsigned long long xn,
     unsigned long long count,
 )
+
+cpdef list encode_binary_scalar(
+    unsigned long long opcode,
+    unsigned long long xn,
+    unsigned long long xd,
+    unsigned long long count,
+    unsigned long long scalar_bits,
+)

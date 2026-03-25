@@ -348,3 +348,18 @@ def test_encode_unary_fp32_matches_vUnary_layout():
     assert ext_field == 0x200
     assert ((words[0] >> isa.V_HEAD_ID_OFFSET) & 0xFFFF) == isa.SIMD_FUNC_OFFSET[isa.V_SQRT]
     assert words[1] == (0x400 << 32) | 32
+
+
+# ---------------------------------------------------------------------------
+# encode_binary_scalar  -- vBinaryS 2-word instruction encoding
+# ---------------------------------------------------------------------------
+
+def test_encode_binary_scalar_matches_vBinaryS_layout():
+    # Upstream vBinaryS::Encode uses vCompactX(xd), and upstream isa.h defines
+    # vCompactX(x) as x >> 5 for xbuf addresses aligned to 32 bytes.
+    words = isa.encode_binary_scalar(opcode=isa.V_ADDS, xn=0x200, xd=0x400, count=32, scalar_bits=0x3F800000)
+    assert len(words) == 2
+    ext_field = (words[0] >> isa.V_HEAD_EXT_OFFSET) & 0x3FFFFFF
+    assert ext_field == 0x200
+    assert ((words[0] >> isa.V_HEAD_ID_OFFSET) & 0xFFFF) == isa.SIMD_FUNC_OFFSET[isa.V_ADDS]
+    assert words[1] == (0x3F800000 << 32) | ((0x400 >> 5) << 16) | 32

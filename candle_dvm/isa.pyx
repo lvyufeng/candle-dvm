@@ -579,3 +579,43 @@ cpdef list encode_unary(
     cdef unsigned long long head = make_simd_head(opcode, xd, 2)
     cdef unsigned long long payload = (xn << 32) | count
     return [head, payload]
+
+
+cpdef list encode_binary_scalar(
+    unsigned long long opcode,
+    unsigned long long xn,
+    unsigned long long xd,
+    unsigned long long count,
+    unsigned long long scalar_bits,
+):
+    """Encode a vBinaryS 2-word SIMD instruction.
+
+    Matches the upstream vBinaryS layout from isa.h:
+      pc[0] = make_simd_head(opcode, xn, 2)
+      pc[1] = scalar_bits << 32 | vCompactX(xd) << 16 | count
+
+    The ext field carries **xn** (the first source register),
+    matching vBinary convention.  The destination xd is packed
+    via ``vCompactX`` (``xd >> 5``) into the payload word.
+
+    Parameters
+    ----------
+    opcode : int
+        SIMD opcode (e.g. ``V_ADDS``).
+    xn : int
+        Source register address (26 bits, goes into ext field).
+    xd : int
+        Destination register address; stored as ``xd >> 5`` in payload.
+    count : int
+        Element count (lower 16 bits of word 1).
+    scalar_bits : int
+        Raw bit pattern of the scalar constant (upper 32 bits of word 1).
+
+    Returns
+    -------
+    list
+        Two-element list of uint64 values ``[head, payload]``.
+    """
+    cdef unsigned long long head = make_simd_head(opcode, xn, 2)
+    cdef unsigned long long payload = (scalar_bits << 32) | ((xd >> 5) << 16) | count
+    return [head, payload]
