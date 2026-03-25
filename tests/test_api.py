@@ -67,9 +67,11 @@ def test_kernel_exposes_isfinite_method():
 
 
 def test_float16_is_exported():
-    """float16 should be importable from the candle_dvm namespace."""
+    """float16 should be importable and equal to DTYPE_FP16."""
     import candle_dvm as dvm
+    from candle_dvm.ops import DTYPE_FP16
     assert hasattr(dvm, "float16")
+    assert dvm.float16 == DTYPE_FP16
 
 
 def test_reciprocal_is_not_exposed():
