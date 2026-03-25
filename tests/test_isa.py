@@ -141,3 +141,175 @@ def test_make_simd_head_zero_opcode():
     expected = (hw_id << isa.V_HEAD_ID_OFFSET) | \
                (1 << isa.V_HEAD_SIZE_OFFSET) | (1 << isa.V_HEAD_SIMD_FLAG_OFFSET)
     assert head == expected
+
+
+# ---------------------------------------------------------------------------
+# Unary op constants  -- match UnaryType in dvm.h
+# ---------------------------------------------------------------------------
+
+def test_unary_op_constants():
+    """Verify unary op enum indices match upstream UnaryType."""
+    assert isa.UNARY_SQRT == 0
+    assert isa.UNARY_ABS == 1
+    assert isa.UNARY_LOG == 2
+    assert isa.UNARY_EXP == 3
+    assert isa.UNARY_ISFINITE == 5
+    assert isa.UNARY_ROUND == 7
+    assert isa.UNARY_FLOOR == 8
+    assert isa.UNARY_CEIL == 9
+    assert isa.UNARY_TRUNC == 10
+
+
+# ---------------------------------------------------------------------------
+# Dtype constants
+# ---------------------------------------------------------------------------
+
+def test_dtype_constants():
+    """Verify dtype constants match upstream DataType enum."""
+    assert isa.DTYPE_F32 == 3
+    assert isa.DTYPE_FP16 == 1
+
+
+# ---------------------------------------------------------------------------
+# Binary op constants  -- match BinaryType in dvm.h
+# ---------------------------------------------------------------------------
+
+def test_binary_op_constants():
+    """Verify binary op enum indices match upstream BinaryType."""
+    assert isa.BIN_ADD == 6
+    assert isa.BIN_SUB == 7
+    assert isa.BIN_MUL == 8
+    assert isa.BIN_DIV == 9
+    assert isa.BIN_MAX == 11
+    assert isa.BIN_MIN == 12
+
+
+# ---------------------------------------------------------------------------
+# UNARY_OPCODE_TABLE routing tests
+# ---------------------------------------------------------------------------
+
+class TestUnaryOpcodeTable:
+    """Tests for UNARY_OPCODE_TABLE: (unary_op, dtype) -> SIMD opcode."""
+
+    # -- sqrt --
+    def test_sqrt_f32(self):
+        assert isa.UNARY_OPCODE_TABLE[(isa.UNARY_SQRT, isa.DTYPE_F32)] == isa.V_SQRT
+
+    def test_sqrt_fp16(self):
+        assert isa.UNARY_OPCODE_TABLE[(isa.UNARY_SQRT, isa.DTYPE_FP16)] == isa.V_SQRT_FP16
+
+    # -- abs --
+    def test_abs_f32(self):
+        assert isa.UNARY_OPCODE_TABLE[(isa.UNARY_ABS, isa.DTYPE_F32)] == isa.V_ABS
+
+    def test_abs_fp16(self):
+        assert isa.UNARY_OPCODE_TABLE[(isa.UNARY_ABS, isa.DTYPE_FP16)] == isa.V_ABS_FP16
+
+    # -- log --
+    def test_log_f32(self):
+        assert isa.UNARY_OPCODE_TABLE[(isa.UNARY_LOG, isa.DTYPE_F32)] == isa.V_LOG
+
+    def test_log_fp16(self):
+        assert isa.UNARY_OPCODE_TABLE[(isa.UNARY_LOG, isa.DTYPE_FP16)] == isa.V_LOG_FP16
+
+    # -- exp --
+    def test_exp_f32(self):
+        assert isa.UNARY_OPCODE_TABLE[(isa.UNARY_EXP, isa.DTYPE_F32)] == isa.V_EXP
+
+    def test_exp_fp16(self):
+        assert isa.UNARY_OPCODE_TABLE[(isa.UNARY_EXP, isa.DTYPE_FP16)] == isa.V_EXP_FP16
+
+    # -- round (f32 only) --
+    def test_round_f32(self):
+        assert isa.UNARY_OPCODE_TABLE[(isa.UNARY_ROUND, isa.DTYPE_F32)] == isa.V_ROUND
+
+    def test_round_fp16_not_present(self):
+        assert (isa.UNARY_ROUND, isa.DTYPE_FP16) not in isa.UNARY_OPCODE_TABLE
+
+    # -- floor (f32 only) --
+    def test_floor_f32(self):
+        assert isa.UNARY_OPCODE_TABLE[(isa.UNARY_FLOOR, isa.DTYPE_F32)] == isa.V_FLOOR
+
+    def test_floor_fp16_not_present(self):
+        assert (isa.UNARY_FLOOR, isa.DTYPE_FP16) not in isa.UNARY_OPCODE_TABLE
+
+    # -- ceil (f32 only) --
+    def test_ceil_f32(self):
+        assert isa.UNARY_OPCODE_TABLE[(isa.UNARY_CEIL, isa.DTYPE_F32)] == isa.V_CEIL
+
+    def test_ceil_fp16_not_present(self):
+        assert (isa.UNARY_CEIL, isa.DTYPE_FP16) not in isa.UNARY_OPCODE_TABLE
+
+    # -- trunc (f32 only) --
+    def test_trunc_f32(self):
+        assert isa.UNARY_OPCODE_TABLE[(isa.UNARY_TRUNC, isa.DTYPE_F32)] == isa.V_TRUNC
+
+    def test_trunc_fp16_not_present(self):
+        assert (isa.UNARY_TRUNC, isa.DTYPE_FP16) not in isa.UNARY_OPCODE_TABLE
+
+    # -- isfinite --
+    def test_isfinite_f32(self):
+        assert isa.UNARY_OPCODE_TABLE[(isa.UNARY_ISFINITE, isa.DTYPE_F32)] == isa.V_ISFINITE
+
+    def test_isfinite_fp16(self):
+        assert isa.UNARY_OPCODE_TABLE[(isa.UNARY_ISFINITE, isa.DTYPE_FP16)] == isa.V_ISFINITE_FP16
+
+    # -- completeness: exactly 14 entries --
+    def test_table_size(self):
+        """9 unary ops: 5 with fp16 variant (10 entries) + 4 f32-only (4 entries) = 14."""
+        assert len(isa.UNARY_OPCODE_TABLE) == 14
+
+
+# ---------------------------------------------------------------------------
+# BINARY_OPCODE_TABLE routing tests
+# ---------------------------------------------------------------------------
+
+class TestBinaryOpcodeTable:
+    """Tests for BINARY_OPCODE_TABLE: (binary_op, dtype) -> SIMD opcode."""
+
+    # -- add --
+    def test_add_f32(self):
+        assert isa.BINARY_OPCODE_TABLE[(isa.BIN_ADD, isa.DTYPE_F32)] == isa.V_ADD
+
+    def test_add_fp16(self):
+        assert isa.BINARY_OPCODE_TABLE[(isa.BIN_ADD, isa.DTYPE_FP16)] == isa.V_ADD_FP16
+
+    # -- sub --
+    def test_sub_f32(self):
+        assert isa.BINARY_OPCODE_TABLE[(isa.BIN_SUB, isa.DTYPE_F32)] == isa.V_SUB
+
+    def test_sub_fp16(self):
+        assert isa.BINARY_OPCODE_TABLE[(isa.BIN_SUB, isa.DTYPE_FP16)] == isa.V_SUB_FP16
+
+    # -- mul --
+    def test_mul_f32(self):
+        assert isa.BINARY_OPCODE_TABLE[(isa.BIN_MUL, isa.DTYPE_F32)] == isa.V_MUL
+
+    def test_mul_fp16(self):
+        assert isa.BINARY_OPCODE_TABLE[(isa.BIN_MUL, isa.DTYPE_FP16)] == isa.V_MUL_FP16
+
+    # -- div --
+    def test_div_f32(self):
+        assert isa.BINARY_OPCODE_TABLE[(isa.BIN_DIV, isa.DTYPE_F32)] == isa.V_DIV
+
+    def test_div_fp16(self):
+        assert isa.BINARY_OPCODE_TABLE[(isa.BIN_DIV, isa.DTYPE_FP16)] == isa.V_DIV_FP16
+
+    # -- max --
+    def test_max_f32(self):
+        assert isa.BINARY_OPCODE_TABLE[(isa.BIN_MAX, isa.DTYPE_F32)] == isa.V_MAX
+
+    def test_max_fp16(self):
+        assert isa.BINARY_OPCODE_TABLE[(isa.BIN_MAX, isa.DTYPE_FP16)] == isa.V_MAX_FP16
+
+    # -- min --
+    def test_min_f32(self):
+        assert isa.BINARY_OPCODE_TABLE[(isa.BIN_MIN, isa.DTYPE_F32)] == isa.V_MIN
+
+    def test_min_fp16(self):
+        assert isa.BINARY_OPCODE_TABLE[(isa.BIN_MIN, isa.DTYPE_FP16)] == isa.V_MIN_FP16
+
+    # -- completeness: exactly 12 entries (6 ops x 2 dtypes) --
+    def test_table_size(self):
+        """6 binary ops x 2 dtypes (f32 + fp16) = 12 entries."""
+        assert len(isa.BINARY_OPCODE_TABLE) == 12

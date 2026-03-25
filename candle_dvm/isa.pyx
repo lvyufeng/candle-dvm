@@ -268,6 +268,93 @@ SIMD_FUNC_OFFSET = [
 
 
 # ===================================================================
+# DataType constants  (dvm.h DataType enum)
+# ===================================================================
+DTYPE_FP16 = 1
+DTYPE_F32  = 3
+
+# ===================================================================
+# UnaryType constants  (dvm.h UnaryType enum)
+# ===================================================================
+UNARY_SQRT     = 0
+UNARY_ABS      = 1
+UNARY_LOG      = 2
+UNARY_EXP      = 3
+UNARY_ISFINITE = 5
+UNARY_ROUND    = 7
+UNARY_FLOOR    = 8
+UNARY_CEIL     = 9
+UNARY_TRUNC    = 10
+
+# ===================================================================
+# BinaryType constants  (dvm.h BinaryType enum)
+# ===================================================================
+BIN_ADD = 6
+BIN_SUB = 7
+BIN_MUL = 8
+BIN_DIV = 9
+BIN_MAX = 11
+BIN_MIN = 12
+
+# ===================================================================
+# Unary opcode routing table
+# Maps (UnaryType, DataType) -> vSimdInsnID
+# Derived from ops.cc unary_id_list[]
+# ===================================================================
+UNARY_OPCODE_TABLE = {
+    # sqrt
+    (UNARY_SQRT, DTYPE_F32):  V_SQRT,
+    (UNARY_SQRT, DTYPE_FP16): V_SQRT_FP16,
+    # abs
+    (UNARY_ABS, DTYPE_F32):  V_ABS,
+    (UNARY_ABS, DTYPE_FP16): V_ABS_FP16,
+    # log
+    (UNARY_LOG, DTYPE_F32):  V_LOG,
+    (UNARY_LOG, DTYPE_FP16): V_LOG_FP16,
+    # exp
+    (UNARY_EXP, DTYPE_F32):  V_EXP,
+    (UNARY_EXP, DTYPE_FP16): V_EXP_FP16,
+    # round (f32 only -- no fp16 variant upstream)
+    (UNARY_ROUND, DTYPE_F32): V_ROUND,
+    # floor (f32 only)
+    (UNARY_FLOOR, DTYPE_F32): V_FLOOR,
+    # ceil (f32 only)
+    (UNARY_CEIL, DTYPE_F32): V_CEIL,
+    # trunc (f32 only)
+    (UNARY_TRUNC, DTYPE_F32): V_TRUNC,
+    # isfinite
+    (UNARY_ISFINITE, DTYPE_F32):  V_ISFINITE,
+    (UNARY_ISFINITE, DTYPE_FP16): V_ISFINITE_FP16,
+}
+
+# ===================================================================
+# Binary opcode routing table
+# Maps (BinaryType, DataType) -> vSimdInsnID
+# Derived from ops.cc binary_id_list[]
+# ===================================================================
+BINARY_OPCODE_TABLE = {
+    # add
+    (BIN_ADD, DTYPE_F32):  V_ADD,
+    (BIN_ADD, DTYPE_FP16): V_ADD_FP16,
+    # sub
+    (BIN_SUB, DTYPE_F32):  V_SUB,
+    (BIN_SUB, DTYPE_FP16): V_SUB_FP16,
+    # mul
+    (BIN_MUL, DTYPE_F32):  V_MUL,
+    (BIN_MUL, DTYPE_FP16): V_MUL_FP16,
+    # div
+    (BIN_DIV, DTYPE_F32):  V_DIV,
+    (BIN_DIV, DTYPE_FP16): V_DIV_FP16,
+    # max
+    (BIN_MAX, DTYPE_F32):  V_MAX,
+    (BIN_MAX, DTYPE_FP16): V_MAX_FP16,
+    # min
+    (BIN_MIN, DTYPE_F32):  V_MIN,
+    (BIN_MIN, DTYPE_FP16): V_MIN_FP16,
+}
+
+
+# ===================================================================
 # Encode helpers
 # ===================================================================
 
