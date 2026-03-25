@@ -123,3 +123,123 @@ def test_decorated_add_1d():
     z = add_1d(x, y)
 
     np.testing.assert_allclose(z, x + y, rtol=1e-5, atol=1e-5)
+
+
+# -------------------------------------------------------------------
+# Batch A -- unary op hardware tests
+# -------------------------------------------------------------------
+
+
+@pytest.mark.requires_910b
+def test_decorated_sqrt_fp32_end_to_end():
+    """End-to-end sqrt on fp32 inputs."""
+
+    @dvm.kernel()
+    def my_sqrt(k, x):
+        a = k.load(x.shape, dvm.float32)
+        return k.store(k.sqrt(a))
+
+    x = np.full([32, 32], 4.0, np.float32)
+    z = my_sqrt(x)
+    np.testing.assert_allclose(z, np.sqrt(x), rtol=1e-5, atol=1e-5)
+
+
+@pytest.mark.requires_910b
+def test_decorated_exp_fp16_end_to_end():
+    """End-to-end exp on fp16 inputs."""
+
+    @dvm.kernel()
+    def my_exp(k, x):
+        a = k.load(x.shape, dvm.float16)
+        return k.store(k.exp(a))
+
+    x = np.full([32, 32], 1.0, np.float16)
+    z = my_exp(x)
+    np.testing.assert_allclose(
+        z.astype(np.float32),
+        np.exp(x.astype(np.float32)),
+        rtol=5e-3, atol=5e-3,
+    )
+
+
+# -------------------------------------------------------------------
+# Batch B -- expanded binary op hardware tests
+# -------------------------------------------------------------------
+
+
+@pytest.mark.requires_910b
+def test_decorated_mul_fp32_end_to_end():
+    """End-to-end mul on fp32 inputs."""
+
+    @dvm.kernel()
+    def my_mul(k, x, y):
+        a = k.load(x.shape, dvm.float32)
+        b = k.load(y.shape, dvm.float32)
+        return k.store(k.mul(a, b))
+
+    x = np.full([32, 32], 2.0, np.float32)
+    y = np.full([32, 32], 3.0, np.float32)
+    z = my_mul(x, y)
+    np.testing.assert_allclose(z, x * y, rtol=1e-5, atol=1e-5)
+
+
+@pytest.mark.requires_910b
+def test_decorated_div_fp16_end_to_end():
+    """End-to-end div on fp16 inputs."""
+
+    @dvm.kernel()
+    def my_div(k, x, y):
+        a = k.load(x.shape, dvm.float16)
+        b = k.load(y.shape, dvm.float16)
+        return k.store(k.div(a, b))
+
+    x = np.full([32, 32], 6.0, np.float16)
+    y = np.full([32, 32], 2.0, np.float16)
+    z = my_div(x, y)
+    np.testing.assert_allclose(
+        z.astype(np.float32),
+        (x / y).astype(np.float32),
+        rtol=5e-3, atol=5e-3,
+    )
+
+
+@pytest.mark.requires_910b
+def test_decorated_maximum_fp32_end_to_end():
+    """End-to-end maximum on fp32 inputs."""
+
+    @dvm.kernel()
+    def my_max(k, x, y):
+        a = k.load(x.shape, dvm.float32)
+        b = k.load(y.shape, dvm.float32)
+        return k.store(k.maximum(a, b))
+
+    x = np.array([1.0, 5.0, 3.0, 7.0, 2.0, 8.0, 4.0, 6.0], np.float32)
+    y = np.array([8.0, 2.0, 6.0, 4.0, 7.0, 1.0, 5.0, 3.0], np.float32)
+    z = my_max(x, y)
+    np.testing.assert_allclose(z, np.maximum(x, y), rtol=1e-5, atol=1e-5)
+
+
+@pytest.mark.requires_910b
+def test_decorated_minimum_fp16_end_to_end():
+    """End-to-end minimum on fp16 inputs."""
+
+    @dvm.kernel()
+    def my_min(k, x, y):
+        a = k.load(x.shape, dvm.float16)
+        b = k.load(y.shape, dvm.float16)
+        return k.store(k.minimum(a, b))
+
+    x = np.array(
+        [1.0, 5.0, 3.0, 7.0, 2.0, 8.0, 4.0, 6.0,
+         9.0, 0.0, 3.0, 5.0, 7.0, 1.0, 8.0, 2.0], np.float16,
+    )
+    y = np.array(
+        [8.0, 2.0, 6.0, 4.0, 7.0, 1.0, 5.0, 3.0,
+         0.0, 9.0, 5.0, 3.0, 1.0, 7.0, 2.0, 8.0], np.float16,
+    )
+    z = my_min(x, y)
+    np.testing.assert_allclose(
+        z.astype(np.float32),
+        np.minimum(x, y).astype(np.float32),
+        rtol=5e-3, atol=5e-3,
+    )
