@@ -475,6 +475,33 @@ BINARY_SCALAR_OPCODE_TABLE = {
 
 
 # ===================================================================
+# Compare type constants  (vCompareType)
+# Derived from dvm.h:493-499
+# ===================================================================
+CMP_EQ = 0
+CMP_NE = 1
+CMP_GT = 2
+CMP_GE = 3
+CMP_LT = 4
+CMP_LE = 5
+
+# ===================================================================
+# Compare opcode routing tables
+# Maps DataType -> vSimdInsnID
+# Derived from ops.cc:51-74
+# ===================================================================
+COMPARE_OPCODE_TABLE = {
+    DTYPE_F32:  V_CMP,
+    DTYPE_FP16: V_CMP_FP16,
+}
+
+COMPARE_SCALAR_OPCODE_TABLE = {
+    DTYPE_F32:  V_CMPS,
+    DTYPE_FP16: V_CMPS_FP16,
+}
+
+
+# ===================================================================
 # Encode helpers
 # ===================================================================
 

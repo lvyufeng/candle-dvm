@@ -337,6 +337,37 @@ def test_binary_scalar_opcode_routing_fp32_and_fp16():
 
 
 # ---------------------------------------------------------------------------
+# Compare type constants  -- vCompareType in dvm.h
+# ---------------------------------------------------------------------------
+
+def test_compare_type_constants_match_upstream():
+    assert isa.CMP_EQ == 0
+    assert isa.CMP_NE == 1
+    assert isa.CMP_GT == 2
+    assert isa.CMP_GE == 3
+    assert isa.CMP_LT == 4
+    assert isa.CMP_LE == 5
+
+
+def test_compare_opcode_routing_fp32_and_fp16():
+    expected = {
+        isa.DTYPE_F32: isa.V_CMP,
+        isa.DTYPE_FP16: isa.V_CMP_FP16,
+    }
+    for dtype, opcode in expected.items():
+        assert isa.COMPARE_OPCODE_TABLE[dtype] == opcode
+
+
+def test_compare_scalar_opcode_routing_fp32_and_fp16():
+    expected = {
+        isa.DTYPE_F32: isa.V_CMPS,
+        isa.DTYPE_FP16: isa.V_CMPS_FP16,
+    }
+    for dtype, opcode in expected.items():
+        assert isa.COMPARE_SCALAR_OPCODE_TABLE[dtype] == opcode
+
+
+# ---------------------------------------------------------------------------
 # encode_unary  -- vUnary 2-word instruction encoding
 # ---------------------------------------------------------------------------
 
