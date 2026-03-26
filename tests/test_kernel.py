@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from candle_dvm.kernel import VKernelS
-from candle_dvm.ops import NDLoad, NDStore, BinaryOp, DTYPE_F32, BIN_ADD
+from candle_dvm.ops import NDLoad, NDStore, BinaryOp, FlexOp, CompareOp, DTYPE_F32, DTYPE_BOOL, BIN_ADD, CMP_EQ
 
 
 # ===================================================================
@@ -147,3 +147,48 @@ class TestVKernelSCodegen:
             f"expected tile_num=1 for shape (32, 32) in phase 1, "
             f"got {k.debug_header()['tile_num']}"
         )
+
+
+# ===================================================================
+# Workspace allocation tests
+# ===================================================================
+
+def test_flexop_workspace_slots_default_zero():
+    """FlexOp.workspace_slots() should return 0 by default."""
+    op = FlexOp(1, DTYPE_F32, (4, 8))
+    assert op.workspace_slots() == 0
+
+
+def test_flexop_workspace_xbuf_default_zero():
+    """FlexOp.workspace_xbuf should be 0 by default."""
+    op = FlexOp(1, DTYPE_F32, (4, 8))
+    assert op.workspace_xbuf == 0
+
+
+def test_existing_ops_have_zero_workspace_slots():
+    """BinaryOp should not request workspace slots."""
+    a = NDLoad(io_index=0, shape=(32, 32), dtype=DTYPE_F32)
+    b = NDLoad(io_index=1, shape=(32, 32), dtype=DTYPE_F32)
+    op = BinaryOp(op_type=BIN_ADD, lhs=a, rhs=b)
+    assert op.workspace_slots() == 0
+
+
+def test_compare_op_workspace_is_source_dtype_sized():
+    """CompareOp result + workspace slots must both be source-dtype-sized.
+    For a (32,32) fp32 compare graph, both the compare result slot and the
+    workspace slot should be sized as fp32 storage (4096 bytes each), even
+    though the logical output dtype is DTYPE_BOOL.
+    """
+    k = VKernelS()
+    a = NDLoad(io_index=0, shape=(32, 32), dtype=DTYPE_F32)
+    b = NDLoad(io_index=1, shape=(32, 32), dtype=DTYPE_F32)
+    c = CompareOp(cmp_type=CMP_EQ, lhs=a, rhs=b)
+    d = NDStore(io_index=0, src=c)
+    for obj in [a, b, c, d]:
+        k.append(obj)
+    k.normalize()
+    k.codegen()
+    # compare result slot uses source dtype physical storage (fp32 = 4096)
+    assert c.workspace_xbuf == c.xbuf + 4096
+    # total allocation: a(4096) + b(4096) + c_result(4096) + workspace(4096)
+    assert c.workspace_xbuf + 4096 == 0x200 + 4096 + 4096 + 4096 + 4096

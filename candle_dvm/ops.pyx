@@ -49,6 +49,8 @@ from candle_dvm.isa import (
     V_C_X_BITS,
     UNARY_OPCODE_TABLE,
     BINARY_SCALAR_OPCODE_TABLE,
+    COMPARE_OPCODE_TABLE,
+    COMPARE_SCALAR_OPCODE_TABLE,
 )
 from candle_dvm.isa import (
     BINS_ADD as BINS_ADD,
@@ -56,8 +58,14 @@ from candle_dvm.isa import (
     BINS_DIV as BINS_DIV,
     BINS_MAX as BINS_MAX,
     BINS_MIN as BINS_MIN,
+    CMP_EQ as CMP_EQ,
+    CMP_NE as CMP_NE,
+    CMP_GT as CMP_GT,
+    CMP_GE as CMP_GE,
+    CMP_LT as CMP_LT,
+    CMP_LE as CMP_LE,
 )
-from candle_dvm.isa cimport make_acc_head, make_simd_head, encode_unary, encode_binary_scalar
+from candle_dvm.isa cimport make_acc_head, make_simd_head, encode_unary, encode_binary_scalar, encode_compare, encode_compare_scalar
 
 import struct as _struct
 
@@ -119,6 +127,8 @@ OBJ_STORE      = 5
 OBJ_UNARY      = 12
 OBJ_BINARY     = 14
 OBJ_BINARY_S   = 15
+OBJ_COMPARE    = 16
+OBJ_COMPARE_S  = 17
 
 # Instruction format constants
 # vLoad: RELOC_OFFSET=1, ROUND_OFFSET=3
@@ -398,8 +408,16 @@ cdef class NDStore(NDAccess):
         """
         cdef NDObject src = self.lhs
         cdef int ndim = len(self.shape_ref)
-        cdef int item_size = _ITEM_SIZE[self.type_id]
-        cdef int simd_width = _SIMD_WIDTH[self.type_id]
+
+        # Bool-producing ops (compare/isfinite) may have logical dtype DTYPE_BOOL
+        # but use source-dtype-sized physical storage on hardware. Use the source
+        # op's storage_type_id() when available for the vStore byte counts.
+        cdef int storage_type_id = self.type_id
+        if self.type_id == DTYPE_BOOL and hasattr(src, 'storage_type_id'):
+            storage_type_id = src.storage_type_id()
+
+        cdef int item_size = _ITEM_SIZE[storage_type_id]
+        cdef int simd_width = _SIMD_WIDTH[storage_type_id]
 
         # Compute dims in reversed order
         cdef list dims = []
@@ -474,6 +492,25 @@ cdef class FlexOp(NDObject):
     def __init__(self, int obj_id, int type_id, tuple shape_ref,
                  NDObject lhs=None, NDObject rhs=None):
         super().__init__(obj_id, type_id, shape_ref, lhs, rhs)
+        self.workspace_xbuf = 0
+
+    def workspace_slots(self):
+        """Return the number of workspace slots this op needs (default 0)."""
+        return 0
+
+    def workspace_dtype(self):
+        """Return the dtype used for workspace slot sizing (default: self.type_id)."""
+        return self.type_id
+
+    def storage_type_id(self):
+        """Return the physical storage dtype for local/device buffers.
+
+        Override in subclasses that store results in a different physical format
+        than the logical dtype.  E.g. CompareOp/CompareScalarOp store source-dtype
+        0/1 values (physical) even though the logical dtype is DTYPE_BOOL.
+        Default: same as type_id.
+        """
+        return self.type_id
 
 
 # ===================================================================
@@ -613,6 +650,11 @@ cdef class UnaryOp(FlexOp):
         if self.op_type == UNARY_ISFINITE:
             self.type_id = DTYPE_BOOL
         self.normalized = True
+
+    def storage_type_id(self):
+        if self.op_type == UNARY_ISFINITE:
+            return self.lhs.type_id
+        return self.type_id
 
     def emit(self, Code code, list relocs):
         """Emit a vUnary instruction.
@@ -774,3 +816,179 @@ cdef class BinaryScalarOp(FlexOp):
         code.append_u64(head)
 
         code.append_u64(<unsigned long long>words[1])
+
+
+# ===================================================================
+# CompareOp -- element-wise tensor-tensor compare (Batch D)
+# ===================================================================
+
+cdef class CompareOp(FlexOp):
+    """Element-wise tensor-tensor compare operation.
+
+    Parameters
+    ----------
+    cmp_type : int
+        Compare semantic type (CMP_EQ, CMP_NE, CMP_GT, CMP_GE, CMP_LT, CMP_LE).
+    lhs : NDObject
+        Left-hand side input tensor.
+    rhs : NDObject
+        Right-hand side input tensor.
+    """
+
+    def __init__(self, int cmp_type, NDObject lhs, NDObject rhs):
+        super().__init__(OBJ_COMPARE, lhs.type_id, lhs.shape_ref, lhs, rhs)
+        self.cmp_type = cmp_type
+
+    def workspace_slots(self):
+        return 1
+
+    def workspace_dtype(self):
+        return self.lhs.type_id
+
+    def storage_type_id(self):
+        return self.lhs.type_id
+
+    def normalize(self):
+        """Check shapes match and set output dtype to DTYPE_BOOL."""
+        if self.lhs is None or self.rhs is None:
+            raise ValueError("CompareOp: both lhs and rhs must be set")
+        if self.lhs.shape_ref != self.rhs.shape_ref:
+            raise ValueError(
+                f"CompareOp: shape mismatch: "
+                f"{self.lhs.shape_ref} vs {self.rhs.shape_ref}"
+            )
+        self.shape_ref = self.lhs.shape_ref
+        self.type_id = DTYPE_BOOL
+        self.normalized = True
+
+    def emit(self, Code code, list relocs):
+        """Emit a vCompare instruction (2 words)."""
+        cdef int src_dtype = self.lhs.type_id
+        if src_dtype not in COMPARE_OPCODE_TABLE:
+            raise NotImplementedError(
+                f"CompareOp: unsupported dtype={src_dtype}"
+            )
+        cdef unsigned long long insn_id = <unsigned long long>COMPARE_OPCODE_TABLE[src_dtype]
+
+        cdef int ndim = len(self.lhs.shape_ref)
+        cdef int simd_width = _SIMD_WIDTH[src_dtype]
+        cdef list dims = []
+        cdef int i
+        for i in range(ndim):
+            dims.append(self.lhs.shape_ref[ndim - 1 - i])
+        cdef long long stride = _round_up(<long long>dims[0], simd_width)
+        for i in range(1, ndim):
+            stride = <long long>dims[i] * stride
+        cdef unsigned long long count = <unsigned long long>stride
+
+        cdef list words = encode_compare(
+            insn_id,
+            <unsigned long long>self.cmp_type,
+            <unsigned long long>self.lhs.xbuf,
+            <unsigned long long>self.rhs.xbuf,
+            <unsigned long long>self.xbuf,
+            <unsigned long long>self.workspace_xbuf,
+            count,
+        )
+
+        cdef unsigned long long head = <unsigned long long>words[0]
+        head |= (<unsigned long long>self.sync_set << V_HEAD_SET_FLAG_OFFSET)
+        head |= (<unsigned long long>self.sync_wait << V_HEAD_WAIT_FLAG_OFFSET)
+        head |= (<unsigned long long>self.sync_back_set << V_HEAD_BACK_SET_OFFSET)
+        head |= (<unsigned long long>self.sync_back_wait << V_HEAD_BACK_WAIT_OFFSET)
+        head |= (<unsigned long long>(self.sync_set_event & 0x7) << V_HEAD_SET_EVENT_OFFSET)
+        head |= (<unsigned long long>(self.sync_wait_event & 0x7) << V_HEAD_WAIT_EVENT_OFFSET)
+        head |= (<unsigned long long>(self.sync_b_set_event & 0x7) << V_HEAD_B_SET_EVENT_OFFSET)
+        head |= (<unsigned long long>(self.sync_b_wait_event & 0x7) << V_HEAD_B_WAIT_EVENT_OFFSET)
+        code.append_u64(head)
+        code.append_u64(<unsigned long long>words[1])
+
+
+# ===================================================================
+# CompareScalarOp -- tensor-scalar compare (Batch D)
+# ===================================================================
+
+cdef class CompareScalarOp(FlexOp):
+    """Element-wise tensor-scalar compare operation.
+
+    Parameters
+    ----------
+    cmp_type : int
+        Compare semantic type (CMP_EQ, CMP_NE, CMP_GT, CMP_GE, CMP_LT, CMP_LE).
+    src : NDObject
+        Input tensor operand.
+    scalar : float
+        Scalar constant value.
+    """
+
+    def __init__(self, int cmp_type, NDObject src, double scalar):
+        super().__init__(OBJ_COMPARE_S, src.type_id, src.shape_ref, src, None)
+        self.cmp_type = cmp_type
+        self.scalar = scalar
+
+    def workspace_slots(self):
+        return 1
+
+    def workspace_dtype(self):
+        return self.lhs.type_id
+
+    def storage_type_id(self):
+        return self.lhs.type_id
+
+    def normalize(self):
+        """Output shape = input shape. Output dtype = DTYPE_BOOL."""
+        if self.lhs is None:
+            raise ValueError("CompareScalarOp: source must not be None")
+        self.shape_ref = self.lhs.shape_ref
+        self.type_id = DTYPE_BOOL
+        self.normalized = True
+
+    def emit(self, Code code, list relocs):
+        """Emit a vCompareS instruction (3 words)."""
+        cdef int src_dtype = self.lhs.type_id
+        if src_dtype not in COMPARE_SCALAR_OPCODE_TABLE:
+            raise NotImplementedError(
+                f"CompareScalarOp: unsupported dtype={src_dtype}"
+            )
+        cdef unsigned long long insn_id = <unsigned long long>COMPARE_SCALAR_OPCODE_TABLE[src_dtype]
+
+        cdef int ndim = len(self.lhs.shape_ref)
+        cdef int simd_width = _SIMD_WIDTH[src_dtype]
+        cdef list dims = []
+        cdef int i
+        for i in range(ndim):
+            dims.append(self.lhs.shape_ref[ndim - 1 - i])
+        cdef long long stride = _round_up(<long long>dims[0], simd_width)
+        for i in range(1, ndim):
+            stride = <long long>dims[i] * stride
+        cdef unsigned long long count = <unsigned long long>stride
+
+        # Pack scalar bits according to source dtype
+        cdef unsigned long long scalar_bits
+        if src_dtype == DTYPE_FP16:
+            scalar_bits = _float_to_fp16_bits(self.scalar)
+        else:
+            scalar_bits = _float_to_fp32_bits(self.scalar)
+
+        cdef list words = encode_compare_scalar(
+            insn_id,
+            <unsigned long long>self.cmp_type,
+            <unsigned long long>self.lhs.xbuf,
+            <unsigned long long>self.xbuf,
+            <unsigned long long>self.workspace_xbuf,
+            count,
+            scalar_bits,
+        )
+
+        cdef unsigned long long head = <unsigned long long>words[0]
+        head |= (<unsigned long long>self.sync_set << V_HEAD_SET_FLAG_OFFSET)
+        head |= (<unsigned long long>self.sync_wait << V_HEAD_WAIT_FLAG_OFFSET)
+        head |= (<unsigned long long>self.sync_back_set << V_HEAD_BACK_SET_OFFSET)
+        head |= (<unsigned long long>self.sync_back_wait << V_HEAD_BACK_WAIT_OFFSET)
+        head |= (<unsigned long long>(self.sync_set_event & 0x7) << V_HEAD_SET_EVENT_OFFSET)
+        head |= (<unsigned long long>(self.sync_wait_event & 0x7) << V_HEAD_WAIT_EVENT_OFFSET)
+        head |= (<unsigned long long>(self.sync_b_set_event & 0x7) << V_HEAD_B_SET_EVENT_OFFSET)
+        head |= (<unsigned long long>(self.sync_b_wait_event & 0x7) << V_HEAD_B_WAIT_EVENT_OFFSET)
+        code.append_u64(head)
+        code.append_u64(<unsigned long long>words[1])
+        code.append_u64(<unsigned long long>words[2])

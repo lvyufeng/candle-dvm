@@ -25,6 +25,8 @@ from candle_dvm.ops import (
     BinaryScalarOp, BINS_ADD, BINS_MUL, BINS_DIV, BINS_MAX, BINS_MIN,
     UnaryOp, UNARY_SQRT, UNARY_ABS, UNARY_LOG, UNARY_EXP,
     UNARY_ROUND, UNARY_FLOOR, UNARY_CEIL, UNARY_TRUNC, UNARY_ISFINITE,
+    CompareOp, CompareScalarOp,
+    CMP_EQ, CMP_NE, CMP_GT, CMP_GE, CMP_LT, CMP_LE,
 )
 
 # Mapping from tensor-tensor BinaryType to scalar BinarySOpType
@@ -38,6 +40,18 @@ _BIN_TO_BINS = {
 
 # Commutative ops allow scalar on the left (swap to tensor-right-scalar)
 _COMMUTATIVE_OPS = frozenset({BIN_ADD, BIN_MUL, BIN_MAX, BIN_MIN})
+
+# Scalar-left rewrite rules for compare ops:
+# - symmetric ops (eq, ne): just swap operands
+# - ordered ops: flip the comparison direction
+_CMP_SCALAR_LEFT_REWRITE = {
+    CMP_EQ: CMP_EQ,
+    CMP_NE: CMP_NE,
+    CMP_GT: CMP_LT,
+    CMP_GE: CMP_LE,
+    CMP_LT: CMP_GT,
+    CMP_LE: CMP_GE,
+}
 
 
 cdef class Kernel:
@@ -330,6 +344,59 @@ cdef class Kernel:
         cdef object node = UnaryOp(UNARY_ISFINITE, x)
         self._kernel.append(node)
         return node
+
+    # ---------------------------------------------------------------
+    # Compare methods (Batch D)
+    # ---------------------------------------------------------------
+
+    cdef object _compare_dispatch(self, int cmp_type, object a, object b):
+        """Route a compare op to CompareOp or CompareScalarOp.
+
+        Scalar-left rewrites ordered comparisons: greater(s, x) -> less(x, s).
+        """
+        cdef bint a_is_tensor = isinstance(a, NDObject)
+        cdef bint b_is_tensor = isinstance(b, NDObject)
+
+        if not a_is_tensor and not b_is_tensor:
+            raise TypeError(
+                "Both operands are scalars; at least one must be a tensor"
+            )
+
+        cdef object node
+        if a_is_tensor and b_is_tensor:
+            node = CompareOp(cmp_type, a, b)
+        elif a_is_tensor and not b_is_tensor:
+            node = CompareScalarOp(cmp_type, a, float(b))
+        else:
+            # scalar-left: rewrite cmp_type and swap operands
+            node = CompareScalarOp(_CMP_SCALAR_LEFT_REWRITE[cmp_type], b, float(a))
+
+        self._kernel.append(node)
+        return node
+
+    cpdef object equal(self, object a, object b):
+        """Element-wise equality compare (returns bool dtype)."""
+        return self._compare_dispatch(CMP_EQ, a, b)
+
+    cpdef object not_equal(self, object a, object b):
+        """Element-wise not-equal compare (returns bool dtype)."""
+        return self._compare_dispatch(CMP_NE, a, b)
+
+    cpdef object greater(self, object a, object b):
+        """Element-wise greater-than compare (returns bool dtype)."""
+        return self._compare_dispatch(CMP_GT, a, b)
+
+    cpdef object greater_equal(self, object a, object b):
+        """Element-wise greater-or-equal compare (returns bool dtype)."""
+        return self._compare_dispatch(CMP_GE, a, b)
+
+    cpdef object less(self, object a, object b):
+        """Element-wise less-than compare (returns bool dtype)."""
+        return self._compare_dispatch(CMP_LT, a, b)
+
+    cpdef object less_equal(self, object a, object b):
+        """Element-wise less-or-equal compare (returns bool dtype)."""
+        return self._compare_dispatch(CMP_LE, a, b)
 
     cpdef void codegen(self):
         """Compile the graph into DVM bytecode.
