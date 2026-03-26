@@ -408,8 +408,16 @@ cdef class NDStore(NDAccess):
         """
         cdef NDObject src = self.lhs
         cdef int ndim = len(self.shape_ref)
-        cdef int item_size = _ITEM_SIZE[self.type_id]
-        cdef int simd_width = _SIMD_WIDTH[self.type_id]
+
+        # Bool-producing ops (compare/isfinite) may have logical dtype DTYPE_BOOL
+        # but use source-dtype-sized physical storage on hardware. Use the source
+        # op's storage_type_id() when available for the vStore byte counts.
+        cdef int storage_type_id = self.type_id
+        if self.type_id == DTYPE_BOOL and hasattr(src, 'storage_type_id'):
+            storage_type_id = src.storage_type_id()
+
+        cdef int item_size = _ITEM_SIZE[storage_type_id]
+        cdef int simd_width = _SIMD_WIDTH[storage_type_id]
 
         # Compute dims in reversed order
         cdef list dims = []
@@ -489,6 +497,20 @@ cdef class FlexOp(NDObject):
     def workspace_slots(self):
         """Return the number of workspace slots this op needs (default 0)."""
         return 0
+
+    def workspace_dtype(self):
+        """Return the dtype used for workspace slot sizing (default: self.type_id)."""
+        return self.type_id
+
+    def storage_type_id(self):
+        """Return the physical storage dtype for local/device buffers.
+
+        Override in subclasses that store results in a different physical format
+        than the logical dtype.  E.g. CompareOp/CompareScalarOp store source-dtype
+        0/1 values (physical) even though the logical dtype is DTYPE_BOOL.
+        Default: same as type_id.
+        """
+        return self.type_id
 
 
 # ===================================================================
@@ -628,6 +650,11 @@ cdef class UnaryOp(FlexOp):
         if self.op_type == UNARY_ISFINITE:
             self.type_id = DTYPE_BOOL
         self.normalized = True
+
+    def storage_type_id(self):
+        if self.op_type == UNARY_ISFINITE:
+            return self.lhs.type_id
+        return self.type_id
 
     def emit(self, Code code, list relocs):
         """Emit a vUnary instruction.
@@ -809,11 +836,17 @@ cdef class CompareOp(FlexOp):
     """
 
     def __init__(self, int cmp_type, NDObject lhs, NDObject rhs):
-        super().__init__(OBJ_COMPARE, DTYPE_BOOL, lhs.shape_ref, lhs, rhs)
+        super().__init__(OBJ_COMPARE, lhs.type_id, lhs.shape_ref, lhs, rhs)
         self.cmp_type = cmp_type
 
     def workspace_slots(self):
         return 1
+
+    def workspace_dtype(self):
+        return self.lhs.type_id
+
+    def storage_type_id(self):
+        return self.lhs.type_id
 
     def normalize(self):
         """Check shapes match and set output dtype to DTYPE_BOOL."""
@@ -889,12 +922,18 @@ cdef class CompareScalarOp(FlexOp):
     """
 
     def __init__(self, int cmp_type, NDObject src, double scalar):
-        super().__init__(OBJ_COMPARE_S, DTYPE_BOOL, src.shape_ref, src, None)
+        super().__init__(OBJ_COMPARE_S, src.type_id, src.shape_ref, src, None)
         self.cmp_type = cmp_type
         self.scalar = scalar
 
     def workspace_slots(self):
         return 1
+
+    def workspace_dtype(self):
+        return self.lhs.type_id
+
+    def storage_type_id(self):
+        return self.lhs.type_id
 
     def normalize(self):
         """Output shape = input shape. Output dtype = DTYPE_BOOL."""
