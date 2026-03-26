@@ -92,3 +92,11 @@ cdef class BinaryScalarOp(FlexOp):
 # ---------------------------------------------------------------------------
 cdef class CompareOp(FlexOp):
     cdef public int cmp_type
+
+
+# ---------------------------------------------------------------------------
+# CompareScalarOp
+# ---------------------------------------------------------------------------
+cdef class CompareScalarOp(FlexOp):
+    cdef public int cmp_type
+    cdef public double scalar

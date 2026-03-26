@@ -869,3 +869,87 @@ cdef class CompareOp(FlexOp):
         head |= (<unsigned long long>(self.sync_b_wait_event & 0x7) << V_HEAD_B_WAIT_EVENT_OFFSET)
         code.append_u64(head)
         code.append_u64(<unsigned long long>words[1])
+
+
+# ===================================================================
+# CompareScalarOp -- tensor-scalar compare (Batch D)
+# ===================================================================
+
+cdef class CompareScalarOp(FlexOp):
+    """Element-wise tensor-scalar compare operation.
+
+    Parameters
+    ----------
+    cmp_type : int
+        Compare semantic type (CMP_EQ, CMP_NE, CMP_GT, CMP_GE, CMP_LT, CMP_LE).
+    src : NDObject
+        Input tensor operand.
+    scalar : float
+        Scalar constant value.
+    """
+
+    def __init__(self, int cmp_type, NDObject src, double scalar):
+        super().__init__(OBJ_COMPARE_S, DTYPE_BOOL, src.shape_ref, src, None)
+        self.cmp_type = cmp_type
+        self.scalar = scalar
+
+    def workspace_slots(self):
+        return 1
+
+    def normalize(self):
+        """Output shape = input shape. Output dtype = DTYPE_BOOL."""
+        if self.lhs is None:
+            raise ValueError("CompareScalarOp: source must not be None")
+        self.shape_ref = self.lhs.shape_ref
+        self.type_id = DTYPE_BOOL
+        self.normalized = True
+
+    def emit(self, Code code, list relocs):
+        """Emit a vCompareS instruction (3 words)."""
+        cdef int src_dtype = self.lhs.type_id
+        if src_dtype not in COMPARE_SCALAR_OPCODE_TABLE:
+            raise NotImplementedError(
+                f"CompareScalarOp: unsupported dtype={src_dtype}"
+            )
+        cdef unsigned long long insn_id = <unsigned long long>COMPARE_SCALAR_OPCODE_TABLE[src_dtype]
+
+        cdef int ndim = len(self.lhs.shape_ref)
+        cdef int simd_width = _SIMD_WIDTH[src_dtype]
+        cdef list dims = []
+        cdef int i
+        for i in range(ndim):
+            dims.append(self.lhs.shape_ref[ndim - 1 - i])
+        cdef long long stride = _round_up(<long long>dims[0], simd_width)
+        for i in range(1, ndim):
+            stride = <long long>dims[i] * stride
+        cdef unsigned long long count = <unsigned long long>stride
+
+        # Pack scalar bits according to source dtype
+        cdef unsigned long long scalar_bits
+        if src_dtype == DTYPE_FP16:
+            scalar_bits = _float_to_fp16_bits(self.scalar)
+        else:
+            scalar_bits = _float_to_fp32_bits(self.scalar)
+
+        cdef list words = encode_compare_scalar(
+            insn_id,
+            <unsigned long long>self.cmp_type,
+            <unsigned long long>self.lhs.xbuf,
+            <unsigned long long>self.xbuf,
+            <unsigned long long>self.workspace_xbuf,
+            count,
+            scalar_bits,
+        )
+
+        cdef unsigned long long head = <unsigned long long>words[0]
+        head |= (<unsigned long long>self.sync_set << V_HEAD_SET_FLAG_OFFSET)
+        head |= (<unsigned long long>self.sync_wait << V_HEAD_WAIT_FLAG_OFFSET)
+        head |= (<unsigned long long>self.sync_back_set << V_HEAD_BACK_SET_OFFSET)
+        head |= (<unsigned long long>self.sync_back_wait << V_HEAD_BACK_WAIT_OFFSET)
+        head |= (<unsigned long long>(self.sync_set_event & 0x7) << V_HEAD_SET_EVENT_OFFSET)
+        head |= (<unsigned long long>(self.sync_wait_event & 0x7) << V_HEAD_WAIT_EVENT_OFFSET)
+        head |= (<unsigned long long>(self.sync_b_set_event & 0x7) << V_HEAD_B_SET_EVENT_OFFSET)
+        head |= (<unsigned long long>(self.sync_b_wait_event & 0x7) << V_HEAD_B_WAIT_EVENT_OFFSET)
+        code.append_u64(head)
+        code.append_u64(<unsigned long long>words[1])
+        code.append_u64(<unsigned long long>words[2])
