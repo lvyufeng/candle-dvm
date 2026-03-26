@@ -674,7 +674,8 @@ cpdef list encode_compare(
     cmp_type : int
         Compare semantic type (CMP_EQ, CMP_NE, CMP_GT, CMP_GE, CMP_LT, CMP_LE).
     xn : int
-        Source register address (18 bits, goes into ext field).
+        Source register address (lower 18 bits of the ext field;
+        ``cmp_type`` occupies the upper 4 bits of that packed compare ext).
     xm : int
         Second source register address (18 bits, lower bits of word 1).
     xd : int
@@ -687,12 +688,11 @@ cpdef list encode_compare(
     Returns
     -------
     list
-        Two-element list of uint64 values [head, payload].
+        Two-element list of uint64 values ``[head, payload]``.
     """
-    return [
-        make_simd_head(opcode, (cmp_type << 18) | xn, 2),
-        (count << 49) | ((ws >> 5) << 36) | (xd << 18) | xm,
-    ]
+    cdef unsigned long long head = make_simd_head(opcode, (cmp_type << 18) | xn, 2)
+    cdef unsigned long long payload = (count << 49) | ((ws >> 5) << 36) | (xd << 18) | xm
+    return [head, payload]
 
 
 cpdef list encode_compare_scalar(
@@ -723,7 +723,8 @@ cpdef list encode_compare_scalar(
     cmp_type : int
         Compare semantic type (CMP_EQ, CMP_NE, CMP_GT, CMP_GE, CMP_LT, CMP_LE).
     xn : int
-        Source register address (18 bits, goes into ext field).
+        Source register address (lower 18 bits of the ext field;
+        ``cmp_type`` occupies the upper 4 bits of that packed compare ext).
     xd : int
         Destination register address (18 bits, low bits of word 1).
     ws : int
