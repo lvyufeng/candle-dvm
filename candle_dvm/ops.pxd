@@ -62,7 +62,7 @@ cdef class NDStore(NDAccess):
 # FlexOp
 # ---------------------------------------------------------------------------
 cdef class FlexOp(NDObject):
-    pass
+    cdef public int workspace_xbuf
 
 
 # ---------------------------------------------------------------------------

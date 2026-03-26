@@ -474,6 +474,11 @@ cdef class FlexOp(NDObject):
     def __init__(self, int obj_id, int type_id, tuple shape_ref,
                  NDObject lhs=None, NDObject rhs=None):
         super().__init__(obj_id, type_id, shape_ref, lhs, rhs)
+        self.workspace_xbuf = 0
+
+    def workspace_slots(self):
+        """Return the number of workspace slots this op needs (default 0)."""
+        return 0
 
 
 # ===================================================================

@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from candle_dvm.kernel import VKernelS
-from candle_dvm.ops import NDLoad, NDStore, BinaryOp, DTYPE_F32, BIN_ADD
+from candle_dvm.ops import NDLoad, NDStore, BinaryOp, FlexOp, DTYPE_F32, DTYPE_BOOL, BIN_ADD
 
 
 # ===================================================================
@@ -147,3 +147,27 @@ class TestVKernelSCodegen:
             f"expected tile_num=1 for shape (32, 32) in phase 1, "
             f"got {k.debug_header()['tile_num']}"
         )
+
+
+# ===================================================================
+# Workspace allocation tests
+# ===================================================================
+
+def test_flexop_workspace_slots_default_zero():
+    """FlexOp.workspace_slots() should return 0 by default."""
+    op = FlexOp(1, DTYPE_F32, (4, 8))
+    assert op.workspace_slots() == 0
+
+
+def test_flexop_workspace_xbuf_default_zero():
+    """FlexOp.workspace_xbuf should be 0 by default."""
+    op = FlexOp(1, DTYPE_F32, (4, 8))
+    assert op.workspace_xbuf == 0
+
+
+def test_existing_ops_have_zero_workspace_slots():
+    """BinaryOp should not request workspace slots."""
+    a = NDLoad(io_index=0, shape=(32, 32), dtype=DTYPE_F32)
+    b = NDLoad(io_index=1, shape=(32, 32), dtype=DTYPE_F32)
+    op = BinaryOp(op_type=BIN_ADD, lhs=a, rhs=b)
+    assert op.workspace_slots() == 0

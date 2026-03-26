@@ -210,6 +210,7 @@ cdef class VKernelS(VectorKernel):
         # Step 6: assign xbuf slots (monotonic allocation)
         # xbuf addresses start at XBUF_BASE_OFFSET (0x200) on 910B
         cdef long long xbuf_cursor = XBUF_BASE_OFFSET
+        cdef int ws_slots
         for obj in objects:
             if obj.obj_id == _OBJ_LOAD:
                 # NDLoad: allocate a new slot
@@ -220,10 +221,16 @@ cdef class VKernelS(VectorKernel):
                 # NDStore: share source's xbuf (no new allocation)
                 obj.xbuf = obj.lhs.xbuf
             else:
-                # BinaryOp / other SIMD ops: allocate a new slot
+                # FlexOp (BinaryOp / UnaryOp / CompareOp etc.): allocate result slot
                 slot_sz = _slot_size(obj.shape_ref, obj.type_id)
                 obj.xbuf = <int>xbuf_cursor
                 xbuf_cursor += slot_sz
+                # Allocate workspace slots if the op requests them
+                if isinstance(obj, FlexOp):
+                    ws_slots = (<FlexOp>obj).workspace_slots()
+                    if ws_slots > 0:
+                        (<FlexOp>obj).workspace_xbuf = <int>xbuf_cursor
+                        xbuf_cursor += slot_sz * ws_slots
 
         # Step 6b: assign sync flags for pipeline synchronization
         # Pattern for load-...-simd-store graphs (phase 1):
