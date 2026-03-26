@@ -24,11 +24,15 @@ from candle_dvm.ops import (
     OBJ_LOAD,
     OBJ_STORE,
     OBJ_BINARY,
+    CMP_EQ,
+    CMP_GT,
+    CMP_LE,
     NDLoad,
     NDStore,
     UnaryOp,
     BinaryOp,
     BinaryScalarOp,
+    CompareOp,
 )
 from candle_dvm.pass_ import run_passes
 
@@ -723,3 +727,46 @@ def test_binary_scalar_emit_raises_for_unsupported_dtype():
             op.emit(code, [])
     finally:
         code.free()
+
+
+# ===================================================================
+# CompareOp tests  (Batch D)
+# ===================================================================
+
+def test_compare_op_normalize_sets_bool_dtype():
+    a = NDLoad(io_index=0, shape=(32, 32), dtype=DTYPE_F32)
+    b = NDLoad(io_index=1, shape=(32, 32), dtype=DTYPE_F32)
+    op = CompareOp(cmp_type=CMP_GT, lhs=a, rhs=b)
+    op.normalize()
+    assert op.shape_ref == (32, 32)
+    assert op.type_id == DTYPE_BOOL
+
+
+def test_compare_op_workspace_slots_is_one():
+    a = NDLoad(io_index=0, shape=(32, 32), dtype=DTYPE_F32)
+    b = NDLoad(io_index=1, shape=(32, 32), dtype=DTYPE_F32)
+    op = CompareOp(cmp_type=CMP_GT, lhs=a, rhs=b)
+    assert op.workspace_slots() == 1
+
+
+def test_compare_op_emit_appends_two_words():
+    a = NDLoad(io_index=0, shape=(4, 8), dtype=DTYPE_F32)
+    b = NDLoad(io_index=1, shape=(4, 8), dtype=DTYPE_F32)
+    a.normalize(); b.normalize()
+    a.xbuf = 0x200; b.xbuf = 0x400
+    op = CompareOp(cmp_type=CMP_GT, lhs=a, rhs=b)
+    op.normalize(); op.xbuf = 0x600; op.workspace_xbuf = 0x800
+    code = Code(capacity=4096)
+    try:
+        op.emit(code, [])
+        assert code.size == 16
+    finally:
+        code.free()
+
+
+def test_compare_op_shape_mismatch_raises():
+    a = NDLoad(io_index=0, shape=(32, 32), dtype=DTYPE_F32)
+    b = NDLoad(io_index=1, shape=(16, 16), dtype=DTYPE_F32)
+    op = CompareOp(cmp_type=CMP_GT, lhs=a, rhs=b)
+    with pytest.raises(ValueError):
+        op.normalize()

@@ -49,6 +49,8 @@ from candle_dvm.isa import (
     V_C_X_BITS,
     UNARY_OPCODE_TABLE,
     BINARY_SCALAR_OPCODE_TABLE,
+    COMPARE_OPCODE_TABLE,
+    COMPARE_SCALAR_OPCODE_TABLE,
 )
 from candle_dvm.isa import (
     BINS_ADD as BINS_ADD,
@@ -56,8 +58,14 @@ from candle_dvm.isa import (
     BINS_DIV as BINS_DIV,
     BINS_MAX as BINS_MAX,
     BINS_MIN as BINS_MIN,
+    CMP_EQ as CMP_EQ,
+    CMP_NE as CMP_NE,
+    CMP_GT as CMP_GT,
+    CMP_GE as CMP_GE,
+    CMP_LT as CMP_LT,
+    CMP_LE as CMP_LE,
 )
-from candle_dvm.isa cimport make_acc_head, make_simd_head, encode_unary, encode_binary_scalar
+from candle_dvm.isa cimport make_acc_head, make_simd_head, encode_unary, encode_binary_scalar, encode_compare, encode_compare_scalar
 
 import struct as _struct
 
@@ -119,6 +127,8 @@ OBJ_STORE      = 5
 OBJ_UNARY      = 12
 OBJ_BINARY     = 14
 OBJ_BINARY_S   = 15
+OBJ_COMPARE    = 16
+OBJ_COMPARE_S  = 17
 
 # Instruction format constants
 # vLoad: RELOC_OFFSET=1, ROUND_OFFSET=3
@@ -778,4 +788,84 @@ cdef class BinaryScalarOp(FlexOp):
         head |= (<unsigned long long>(self.sync_b_wait_event & 0x7) << V_HEAD_B_WAIT_EVENT_OFFSET)
         code.append_u64(head)
 
+        code.append_u64(<unsigned long long>words[1])
+
+
+# ===================================================================
+# CompareOp -- element-wise tensor-tensor compare (Batch D)
+# ===================================================================
+
+cdef class CompareOp(FlexOp):
+    """Element-wise tensor-tensor compare operation.
+
+    Parameters
+    ----------
+    cmp_type : int
+        Compare semantic type (CMP_EQ, CMP_NE, CMP_GT, CMP_GE, CMP_LT, CMP_LE).
+    lhs : NDObject
+        Left-hand side input tensor.
+    rhs : NDObject
+        Right-hand side input tensor.
+    """
+
+    def __init__(self, int cmp_type, NDObject lhs, NDObject rhs):
+        super().__init__(OBJ_COMPARE, DTYPE_BOOL, lhs.shape_ref, lhs, rhs)
+        self.cmp_type = cmp_type
+
+    def workspace_slots(self):
+        return 1
+
+    def normalize(self):
+        """Check shapes match and set output dtype to DTYPE_BOOL."""
+        if self.lhs is None or self.rhs is None:
+            raise ValueError("CompareOp: both lhs and rhs must be set")
+        if self.lhs.shape_ref != self.rhs.shape_ref:
+            raise ValueError(
+                f"CompareOp: shape mismatch: "
+                f"{self.lhs.shape_ref} vs {self.rhs.shape_ref}"
+            )
+        self.shape_ref = self.lhs.shape_ref
+        self.type_id = DTYPE_BOOL
+        self.normalized = True
+
+    def emit(self, Code code, list relocs):
+        """Emit a vCompare instruction (2 words)."""
+        cdef int src_dtype = self.lhs.type_id
+        if src_dtype not in COMPARE_OPCODE_TABLE:
+            raise NotImplementedError(
+                f"CompareOp: unsupported dtype={src_dtype}"
+            )
+        cdef unsigned long long insn_id = <unsigned long long>COMPARE_OPCODE_TABLE[src_dtype]
+
+        cdef int ndim = len(self.lhs.shape_ref)
+        cdef int simd_width = _SIMD_WIDTH[src_dtype]
+        cdef list dims = []
+        cdef int i
+        for i in range(ndim):
+            dims.append(self.lhs.shape_ref[ndim - 1 - i])
+        cdef long long stride = _round_up(<long long>dims[0], simd_width)
+        for i in range(1, ndim):
+            stride = <long long>dims[i] * stride
+        cdef unsigned long long count = <unsigned long long>stride
+
+        cdef list words = encode_compare(
+            insn_id,
+            <unsigned long long>self.cmp_type,
+            <unsigned long long>self.lhs.xbuf,
+            <unsigned long long>self.rhs.xbuf,
+            <unsigned long long>self.xbuf,
+            <unsigned long long>self.workspace_xbuf,
+            count,
+        )
+
+        cdef unsigned long long head = <unsigned long long>words[0]
+        head |= (<unsigned long long>self.sync_set << V_HEAD_SET_FLAG_OFFSET)
+        head |= (<unsigned long long>self.sync_wait << V_HEAD_WAIT_FLAG_OFFSET)
+        head |= (<unsigned long long>self.sync_back_set << V_HEAD_BACK_SET_OFFSET)
+        head |= (<unsigned long long>self.sync_back_wait << V_HEAD_BACK_WAIT_OFFSET)
+        head |= (<unsigned long long>(self.sync_set_event & 0x7) << V_HEAD_SET_EVENT_OFFSET)
+        head |= (<unsigned long long>(self.sync_wait_event & 0x7) << V_HEAD_WAIT_EVENT_OFFSET)
+        head |= (<unsigned long long>(self.sync_b_set_event & 0x7) << V_HEAD_B_SET_EVENT_OFFSET)
+        head |= (<unsigned long long>(self.sync_b_wait_event & 0x7) << V_HEAD_B_WAIT_EVENT_OFFSET)
+        code.append_u64(head)
         code.append_u64(<unsigned long long>words[1])
