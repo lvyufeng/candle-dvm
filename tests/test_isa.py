@@ -396,6 +396,24 @@ def test_encode_binary_scalar_matches_vBinaryS_layout():
     assert words[1] == (0x3F800000 << 32) | ((0x400 >> 5) << 16) | 32
 
 
+def test_encode_compare_scalar_matches_vCompareS_layout():
+    words = isa.encode_compare_scalar(
+        opcode=isa.V_CMPS,
+        cmp_type=isa.CMP_LE,
+        xn=0x200,
+        xd=0x400,
+        ws=0x600,
+        count=32,
+        scalar_bits=0x3F800000,
+    )
+    assert len(words) == 3
+    ext_field = (words[0] >> isa.V_HEAD_EXT_OFFSET) & 0x3FFFFFF
+    assert ext_field == ((isa.CMP_LE << 18) | 0x200)
+    assert ((words[0] >> isa.V_HEAD_ID_OFFSET) & 0xFFFF) == isa.SIMD_FUNC_OFFSET[isa.V_CMPS]
+    assert words[1] == (32 << 48) | (0x600 << 18) | 0x400
+    assert words[2] == 0x3F800000
+
+
 def test_encode_compare_matches_vCompare_layout():
     words = isa.encode_compare(
         opcode=isa.V_CMP,

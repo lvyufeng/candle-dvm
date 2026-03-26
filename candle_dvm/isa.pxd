@@ -46,3 +46,12 @@ cpdef list encode_compare(
     unsigned long long ws,
     unsigned long long count,
 )
+cpdef list encode_compare_scalar(
+    unsigned long long opcode,
+    unsigned long long cmp_type,
+    unsigned long long xn,
+    unsigned long long xd,
+    unsigned long long ws,
+    unsigned long long count,
+    unsigned long long scalar_bits,
+)

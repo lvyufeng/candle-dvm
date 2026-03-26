@@ -693,3 +693,51 @@ cpdef list encode_compare(
         make_simd_head(opcode, (cmp_type << 18) | xn, 2),
         (count << 49) | ((ws >> 5) << 36) | (xd << 18) | xm,
     ]
+
+
+cpdef list encode_compare_scalar(
+    unsigned long long opcode,
+    unsigned long long cmp_type,
+    unsigned long long xn,
+    unsigned long long xd,
+    unsigned long long ws,
+    unsigned long long count,
+    unsigned long long scalar_bits,
+):
+    """Encode a vCompareS 3-word SIMD instruction.
+
+    Matches the upstream vCompareS layout from isa.h::
+
+      pc[0] = make_simd_head(opcode, (cmp_type << 18) | xn, 3)
+      pc[1] = count << 48 | ws << 18 | xd
+      pc[2] = scalar_bits
+
+    Unlike vCompare, ws is a full 18-bit address (not compact_x),
+    and the instruction is 3 words instead of 2.
+    count is 16 bits.
+
+    Parameters
+    ----------
+    opcode : int
+        SIMD opcode (e.g. V_CMPS or V_CMPS_FP16).
+    cmp_type : int
+        Compare semantic type (CMP_EQ, CMP_NE, CMP_GT, CMP_GE, CMP_LT, CMP_LE).
+    xn : int
+        Source register address (18 bits, goes into ext field).
+    xd : int
+        Destination register address (18 bits, low bits of word 1).
+    ws : int
+        Workspace register address (18 bits full, not compact).
+    count : int
+        Element count (16 bits, upper bits of word 1).
+    scalar_bits : int
+        Raw bit pattern of the scalar constant (word 2).
+
+    Returns
+    -------
+    list
+        Three-element list of uint64 values [head, payload, scalar].
+    """
+    cdef unsigned long long head = make_simd_head(opcode, (cmp_type << 18) | xn, 3)
+    cdef unsigned long long payload = (count << 48) | (ws << 18) | xd
+    return [head, payload, scalar_bits]
