@@ -656,6 +656,39 @@ cpdef list encode_compare(
     unsigned long long ws,
     unsigned long long count,
 ):
+    """Encode a vCompare 2-word SIMD instruction.
+
+    Matches the upstream vCompare layout from isa.h::
+
+      pc[0] = make_simd_head(opcode, (cmp_type << 18) | xn, 2)
+      pc[1] = count << 49 | vCompactX(ws) << 36 | xd << 18 | xm
+
+    The ext field carries both cmp_type (upper 4 bits) and xn (lower 18 bits).
+    The workspace ws is packed via vCompactX (ws >> 5).
+    count is 15 bits.
+
+    Parameters
+    ----------
+    opcode : int
+        SIMD opcode (e.g. V_CMP or V_CMP_FP16).
+    cmp_type : int
+        Compare semantic type (CMP_EQ, CMP_NE, CMP_GT, CMP_GE, CMP_LT, CMP_LE).
+    xn : int
+        Source register address (18 bits, goes into ext field).
+    xm : int
+        Second source register address (18 bits, lower bits of word 1).
+    xd : int
+        Destination register address (18 bits, mid bits of word 1).
+    ws : int
+        Workspace register address; stored as ws >> 5 in word 1.
+    count : int
+        Element count (15 bits, upper bits of word 1).
+
+    Returns
+    -------
+    list
+        Two-element list of uint64 values [head, payload].
+    """
     return [
         make_simd_head(opcode, (cmp_type << 18) | xn, 2),
         (count << 49) | ((ws >> 5) << 36) | (xd << 18) | xm,
