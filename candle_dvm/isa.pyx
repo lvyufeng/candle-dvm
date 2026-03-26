@@ -646,3 +646,17 @@ cpdef list encode_binary_scalar(
     cdef unsigned long long head = make_simd_head(opcode, xn, 2)
     cdef unsigned long long payload = (scalar_bits << 32) | ((xd >> 5) << 16) | count
     return [head, payload]
+
+cpdef list encode_compare(
+    unsigned long long opcode,
+    unsigned long long cmp_type,
+    unsigned long long xn,
+    unsigned long long xm,
+    unsigned long long xd,
+    unsigned long long ws,
+    unsigned long long count,
+):
+    return [
+        make_simd_head(opcode, (cmp_type << 18) | xn, 2),
+        (count << 49) | ((ws >> 5) << 36) | (xd << 18) | xm,
+    ]

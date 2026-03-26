@@ -394,3 +394,20 @@ def test_encode_binary_scalar_matches_vBinaryS_layout():
     assert ext_field == 0x200
     assert ((words[0] >> isa.V_HEAD_ID_OFFSET) & 0xFFFF) == isa.SIMD_FUNC_OFFSET[isa.V_ADDS]
     assert words[1] == (0x3F800000 << 32) | ((0x400 >> 5) << 16) | 32
+
+
+def test_encode_compare_matches_vCompare_layout():
+    words = isa.encode_compare(
+        opcode=isa.V_CMP,
+        cmp_type=isa.CMP_GT,
+        xn=0x200,
+        xm=0x400,
+        xd=0x600,
+        ws=0x800,
+        count=32,
+    )
+    assert len(words) == 2
+    ext_field = (words[0] >> isa.V_HEAD_EXT_OFFSET) & 0x3FFFFFF
+    assert ext_field == ((isa.CMP_GT << 18) | 0x200)
+    assert ((words[0] >> isa.V_HEAD_ID_OFFSET) & 0xFFFF) == isa.SIMD_FUNC_OFFSET[isa.V_CMP]
+    assert words[1] == (32 << 49) | ((0x800 >> 5) << 36) | (0x600 << 18) | 0x400
