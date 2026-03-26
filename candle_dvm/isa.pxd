@@ -1,5 +1,12 @@
 # cython: language_level=3
-"""Cython declaration file for candle_dvm.isa encode helpers."""
+"""Cython declaration file for candle_dvm.isa encode helpers.
+
+Module-level Python constants (access via ``from candle_dvm.isa import ...``):
+    BINS_ADD, BINS_MUL, BINS_DIV, BINS_MAX, BINS_MIN
+        BinarySOpType indices for scalar binary ops (Batch C).
+    BINARY_SCALAR_OPCODE_TABLE : dict[(int, int), int]
+        Maps ``(BinarySOpType, DataType)`` to ``vSimdInsnID``.
+"""
 
 # ---------------------------------------------------------------------------
 # Encode helpers  (cpdef -- accessible from both Cython and Python)
@@ -21,4 +28,30 @@ cpdef list encode_unary(
     unsigned long long xd,
     unsigned long long xn,
     unsigned long long count,
+)
+
+cpdef list encode_binary_scalar(
+    unsigned long long opcode,
+    unsigned long long xn,
+    unsigned long long xd,
+    unsigned long long count,
+    unsigned long long scalar_bits,
+)
+cpdef list encode_compare(
+    unsigned long long opcode,
+    unsigned long long cmp_type,
+    unsigned long long xn,
+    unsigned long long xm,
+    unsigned long long xd,
+    unsigned long long ws,
+    unsigned long long count,
+)
+cpdef list encode_compare_scalar(
+    unsigned long long opcode,
+    unsigned long long cmp_type,
+    unsigned long long xn,
+    unsigned long long xd,
+    unsigned long long ws,
+    unsigned long long count,
+    unsigned long long scalar_bits,
 )

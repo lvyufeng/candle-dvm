@@ -210,6 +210,10 @@ cdef class VKernelS(VectorKernel):
         # Step 6: assign xbuf slots (monotonic allocation)
         # xbuf addresses start at XBUF_BASE_OFFSET (0x200) on 910B
         cdef long long xbuf_cursor = XBUF_BASE_OFFSET
+        cdef int ws_slots
+        cdef int ws_dtype
+        cdef int result_storage_type
+        cdef long long ws_slot_sz
         for obj in objects:
             if obj.obj_id == _OBJ_LOAD:
                 # NDLoad: allocate a new slot
@@ -220,10 +224,24 @@ cdef class VKernelS(VectorKernel):
                 # NDStore: share source's xbuf (no new allocation)
                 obj.xbuf = obj.lhs.xbuf
             else:
-                # BinaryOp / other SIMD ops: allocate a new slot
-                slot_sz = _slot_size(obj.shape_ref, obj.type_id)
+                # FlexOp (BinaryOp / UnaryOp / CompareOp etc.): allocate result slot
+                # Use the physical storage dtype for slot sizing; ops like CompareOp
+                # have logical DTYPE_BOOL but store source-dtype-sized 0/1 values.
+                if hasattr(obj, 'storage_type_id'):
+                    result_storage_type = obj.storage_type_id()
+                else:
+                    result_storage_type = obj.type_id
+                slot_sz = _slot_size(obj.shape_ref, result_storage_type)
                 obj.xbuf = <int>xbuf_cursor
                 xbuf_cursor += slot_sz
+                # Allocate workspace slots if the op requests them
+                if isinstance(obj, FlexOp):
+                    ws_slots = (<FlexOp>obj).workspace_slots()
+                    if ws_slots > 0:
+                        ws_dtype = (<FlexOp>obj).workspace_dtype()
+                        ws_slot_sz = _slot_size(obj.shape_ref, ws_dtype)
+                        (<FlexOp>obj).workspace_xbuf = <int>xbuf_cursor
+                        xbuf_cursor += ws_slot_sz * ws_slots
 
         # Step 6b: assign sync flags for pipeline synchronization
         # Pattern for load-...-simd-store graphs (phase 1):

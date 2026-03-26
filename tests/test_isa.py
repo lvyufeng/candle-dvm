@@ -316,6 +316,58 @@ class TestBinaryOpcodeTable:
 
 
 # ---------------------------------------------------------------------------
+# BINARY_SCALAR_OPCODE_TABLE routing
+# ---------------------------------------------------------------------------
+
+def test_binary_scalar_opcode_routing_fp32_and_fp16():
+    expected = {
+        (isa.BINS_ADD, isa.DTYPE_F32): isa.V_ADDS,
+        (isa.BINS_ADD, isa.DTYPE_FP16): isa.V_ADDS_FP16,
+        (isa.BINS_MUL, isa.DTYPE_F32): isa.V_MULS,
+        (isa.BINS_MUL, isa.DTYPE_FP16): isa.V_MULS_FP16,
+        (isa.BINS_DIV, isa.DTYPE_F32): isa.V_DIVS,
+        (isa.BINS_DIV, isa.DTYPE_FP16): isa.V_DIVS_FP16,
+        (isa.BINS_MAX, isa.DTYPE_F32): isa.V_MAXS,
+        (isa.BINS_MAX, isa.DTYPE_FP16): isa.V_MAXS_FP16,
+        (isa.BINS_MIN, isa.DTYPE_F32): isa.V_MINS,
+        (isa.BINS_MIN, isa.DTYPE_FP16): isa.V_MINS_FP16,
+    }
+    for key, val in expected.items():
+        assert isa.BINARY_SCALAR_OPCODE_TABLE[key] == val
+
+
+# ---------------------------------------------------------------------------
+# Compare type constants  -- vCompareType in dvm.h
+# ---------------------------------------------------------------------------
+
+def test_compare_type_constants_match_upstream():
+    assert isa.CMP_EQ == 0
+    assert isa.CMP_NE == 1
+    assert isa.CMP_GT == 2
+    assert isa.CMP_GE == 3
+    assert isa.CMP_LT == 4
+    assert isa.CMP_LE == 5
+
+
+def test_compare_opcode_routing_fp32_and_fp16():
+    expected = {
+        isa.DTYPE_F32: isa.V_CMP,
+        isa.DTYPE_FP16: isa.V_CMP_FP16,
+    }
+    for dtype, opcode in expected.items():
+        assert isa.COMPARE_OPCODE_TABLE[dtype] == opcode
+
+
+def test_compare_scalar_opcode_routing_fp32_and_fp16():
+    expected = {
+        isa.DTYPE_F32: isa.V_CMPS,
+        isa.DTYPE_FP16: isa.V_CMPS_FP16,
+    }
+    for dtype, opcode in expected.items():
+        assert isa.COMPARE_SCALAR_OPCODE_TABLE[dtype] == opcode
+
+
+# ---------------------------------------------------------------------------
 # encode_unary  -- vUnary 2-word instruction encoding
 # ---------------------------------------------------------------------------
 
@@ -327,3 +379,53 @@ def test_encode_unary_fp32_matches_vUnary_layout():
     assert ext_field == 0x200
     assert ((words[0] >> isa.V_HEAD_ID_OFFSET) & 0xFFFF) == isa.SIMD_FUNC_OFFSET[isa.V_SQRT]
     assert words[1] == (0x400 << 32) | 32
+
+
+# ---------------------------------------------------------------------------
+# encode_binary_scalar  -- vBinaryS 2-word instruction encoding
+# ---------------------------------------------------------------------------
+
+def test_encode_binary_scalar_matches_vBinaryS_layout():
+    # Upstream vBinaryS::Encode uses vCompactX(xd), and upstream isa.h defines
+    # vCompactX(x) as x >> 5 for xbuf addresses aligned to 32 bytes.
+    words = isa.encode_binary_scalar(opcode=isa.V_ADDS, xn=0x200, xd=0x400, count=32, scalar_bits=0x3F800000)
+    assert len(words) == 2
+    ext_field = (words[0] >> isa.V_HEAD_EXT_OFFSET) & 0x3FFFFFF
+    assert ext_field == 0x200
+    assert ((words[0] >> isa.V_HEAD_ID_OFFSET) & 0xFFFF) == isa.SIMD_FUNC_OFFSET[isa.V_ADDS]
+    assert words[1] == (0x3F800000 << 32) | ((0x400 >> 5) << 16) | 32
+
+
+def test_encode_compare_scalar_matches_vCompareS_layout():
+    words = isa.encode_compare_scalar(
+        opcode=isa.V_CMPS,
+        cmp_type=isa.CMP_LE,
+        xn=0x200,
+        xd=0x400,
+        ws=0x600,
+        count=32,
+        scalar_bits=0x3F800000,
+    )
+    assert len(words) == 3
+    ext_field = (words[0] >> isa.V_HEAD_EXT_OFFSET) & 0x3FFFFFF
+    assert ext_field == ((isa.CMP_LE << 18) | 0x200)
+    assert ((words[0] >> isa.V_HEAD_ID_OFFSET) & 0xFFFF) == isa.SIMD_FUNC_OFFSET[isa.V_CMPS]
+    assert words[1] == (32 << 48) | (0x600 << 18) | 0x400
+    assert words[2] == 0x3F800000
+
+
+def test_encode_compare_matches_vCompare_layout():
+    words = isa.encode_compare(
+        opcode=isa.V_CMP,
+        cmp_type=isa.CMP_GT,
+        xn=0x200,
+        xm=0x400,
+        xd=0x600,
+        ws=0x800,
+        count=32,
+    )
+    assert len(words) == 2
+    ext_field = (words[0] >> isa.V_HEAD_EXT_OFFSET) & 0x3FFFFFF
+    assert ext_field == ((isa.CMP_GT << 18) | 0x200)
+    assert ((words[0] >> isa.V_HEAD_ID_OFFSET) & 0xFFFF) == isa.SIMD_FUNC_OFFSET[isa.V_CMP]
+    assert words[1] == (32 << 49) | ((0x800 >> 5) << 36) | (0x600 << 18) | 0x400

@@ -62,7 +62,7 @@ cdef class NDStore(NDAccess):
 # FlexOp
 # ---------------------------------------------------------------------------
 cdef class FlexOp(NDObject):
-    pass
+    cdef public int workspace_xbuf
 
 
 # ---------------------------------------------------------------------------
@@ -77,3 +77,26 @@ cdef class BinaryOp(FlexOp):
 # ---------------------------------------------------------------------------
 cdef class UnaryOp(FlexOp):
     cdef public int op_type
+
+
+# ---------------------------------------------------------------------------
+# BinaryScalarOp
+# ---------------------------------------------------------------------------
+cdef class BinaryScalarOp(FlexOp):
+    cdef public int op_type
+    cdef public double scalar
+
+
+# ---------------------------------------------------------------------------
+# CompareOp
+# ---------------------------------------------------------------------------
+cdef class CompareOp(FlexOp):
+    cdef public int cmp_type
+
+
+# ---------------------------------------------------------------------------
+# CompareScalarOp
+# ---------------------------------------------------------------------------
+cdef class CompareScalarOp(FlexOp):
+    cdef public int cmp_type
+    cdef public double scalar

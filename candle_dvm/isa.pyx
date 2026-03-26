@@ -441,6 +441,67 @@ BINARY_OPCODE_TABLE = {
 
 
 # ===================================================================
+# BinarySOpType constants  (dvm.h BinarySOpType enum)
+# Index into binarys_id_list[] in ops.cc; compare/ScalarDiv excluded.
+# ===================================================================
+BINS_ADD  = 6
+BINS_MUL  = 7
+BINS_DIV  = 8
+BINS_MAX  = 10
+BINS_MIN  = 11
+
+# ===================================================================
+# Binary-scalar opcode routing table
+# Maps (BinarySOpType, DataType) -> vSimdInsnID
+# Derived from ops.cc binarys_id_list[]
+# ===================================================================
+BINARY_SCALAR_OPCODE_TABLE = {
+    # add scalar
+    (BINS_ADD, DTYPE_F32):  V_ADDS,
+    (BINS_ADD, DTYPE_FP16): V_ADDS_FP16,
+    # mul scalar
+    (BINS_MUL, DTYPE_F32):  V_MULS,
+    (BINS_MUL, DTYPE_FP16): V_MULS_FP16,
+    # div scalar
+    (BINS_DIV, DTYPE_F32):  V_DIVS,
+    (BINS_DIV, DTYPE_FP16): V_DIVS_FP16,
+    # maximum scalar
+    (BINS_MAX, DTYPE_F32):  V_MAXS,
+    (BINS_MAX, DTYPE_FP16): V_MAXS_FP16,
+    # minimum scalar
+    (BINS_MIN, DTYPE_F32):  V_MINS,
+    (BINS_MIN, DTYPE_FP16): V_MINS_FP16,
+}
+
+
+# ===================================================================
+# Compare type constants  (vCompareType)
+# Derived from dvm.h:493-499
+# ===================================================================
+CMP_EQ = 0
+CMP_NE = 1
+CMP_GT = 2
+CMP_GE = 3
+CMP_LT = 4
+CMP_LE = 5
+
+# ===================================================================
+# Compare opcode routing tables
+# Maps DataType -> vSimdInsnID
+# Derived from ops.cc:51-74
+# ===================================================================
+COMPARE_OPCODE_TABLE = {
+    DTYPE_F32:  V_CMP,
+    DTYPE_FP16: V_CMP_FP16,
+}
+
+COMPARE_SCALAR_OPCODE_TABLE = {
+    DTYPE_F32:  V_CMPS,
+    DTYPE_FP16: V_CMPS_FP16,
+}
+
+
+# ===================================================================
 # Encode helpers
 # ===================================================================
 
@@ -545,3 +606,139 @@ cpdef list encode_unary(
     cdef unsigned long long head = make_simd_head(opcode, xd, 2)
     cdef unsigned long long payload = (xn << 32) | count
     return [head, payload]
+
+
+cpdef list encode_binary_scalar(
+    unsigned long long opcode,
+    unsigned long long xn,
+    unsigned long long xd,
+    unsigned long long count,
+    unsigned long long scalar_bits,
+):
+    """Encode a vBinaryS 2-word SIMD instruction.
+
+    Matches the upstream vBinaryS layout from isa.h:
+      pc[0] = make_simd_head(opcode, xn, 2)
+      pc[1] = scalar_bits << 32 | vCompactX(xd) << 16 | count
+
+    The ext field carries **xn** (the first source register),
+    matching vBinary convention.  The destination xd is packed
+    via ``vCompactX`` (``xd >> 5``) into the payload word.
+
+    Parameters
+    ----------
+    opcode : int
+        SIMD opcode (e.g. ``V_ADDS``).
+    xn : int
+        Source register address (26 bits, goes into ext field).
+    xd : int
+        Destination register address; stored as ``xd >> 5`` in payload.
+    count : int
+        Element count (lower 16 bits of word 1).
+    scalar_bits : int
+        Raw bit pattern of the scalar constant (upper 32 bits of word 1).
+
+    Returns
+    -------
+    list
+        Two-element list of uint64 values ``[head, payload]``.
+    """
+    cdef unsigned long long head = make_simd_head(opcode, xn, 2)
+    cdef unsigned long long payload = (scalar_bits << 32) | ((xd >> 5) << 16) | count
+    return [head, payload]
+
+cpdef list encode_compare(
+    unsigned long long opcode,
+    unsigned long long cmp_type,
+    unsigned long long xn,
+    unsigned long long xm,
+    unsigned long long xd,
+    unsigned long long ws,
+    unsigned long long count,
+):
+    """Encode a vCompare 2-word SIMD instruction.
+
+    Matches the upstream vCompare layout from isa.h::
+
+      pc[0] = make_simd_head(opcode, (cmp_type << 18) | xn, 2)
+      pc[1] = count << 49 | vCompactX(ws) << 36 | xd << 18 | xm
+
+    The ext field carries both cmp_type (upper 4 bits) and xn (lower 18 bits).
+    The workspace ws is packed via vCompactX (ws >> 5).
+    count is 15 bits.
+
+    Parameters
+    ----------
+    opcode : int
+        SIMD opcode (e.g. V_CMP or V_CMP_FP16).
+    cmp_type : int
+        Compare semantic type (CMP_EQ, CMP_NE, CMP_GT, CMP_GE, CMP_LT, CMP_LE).
+    xn : int
+        Source register address (lower 18 bits of the ext field;
+        ``cmp_type`` occupies the upper 4 bits of that packed compare ext).
+    xm : int
+        Second source register address (18 bits, lower bits of word 1).
+    xd : int
+        Destination register address (18 bits, mid bits of word 1).
+    ws : int
+        Workspace register address; stored as ws >> 5 in word 1.
+    count : int
+        Element count (15 bits, upper bits of word 1).
+
+    Returns
+    -------
+    list
+        Two-element list of uint64 values ``[head, payload]``.
+    """
+    cdef unsigned long long head = make_simd_head(opcode, (cmp_type << 18) | xn, 2)
+    cdef unsigned long long payload = (count << 49) | ((ws >> 5) << 36) | (xd << 18) | xm
+    return [head, payload]
+
+
+cpdef list encode_compare_scalar(
+    unsigned long long opcode,
+    unsigned long long cmp_type,
+    unsigned long long xn,
+    unsigned long long xd,
+    unsigned long long ws,
+    unsigned long long count,
+    unsigned long long scalar_bits,
+):
+    """Encode a vCompareS 3-word SIMD instruction.
+
+    Matches the upstream vCompareS layout from isa.h::
+
+      pc[0] = make_simd_head(opcode, (cmp_type << 18) | xn, 3)
+      pc[1] = count << 48 | ws << 18 | xd
+      pc[2] = scalar_bits
+
+    Unlike vCompare, ws is a full 18-bit address (not compact_x),
+    and the instruction is 3 words instead of 2.
+    count is 16 bits.
+
+    Parameters
+    ----------
+    opcode : int
+        SIMD opcode (e.g. V_CMPS or V_CMPS_FP16).
+    cmp_type : int
+        Compare semantic type (CMP_EQ, CMP_NE, CMP_GT, CMP_GE, CMP_LT, CMP_LE).
+    xn : int
+        Source register address (lower 18 bits of the ext field;
+        ``cmp_type`` occupies the upper 4 bits of that packed compare ext).
+    xd : int
+        Destination register address (18 bits, low bits of word 1).
+    ws : int
+        Workspace register address (18 bits full, not compact).
+    count : int
+        Element count (16 bits, upper bits of word 1).
+    scalar_bits : int
+        Raw bit pattern of the scalar constant (word 2).
+
+    Returns
+    -------
+    list
+        Three-element list of uint64 values [head, payload, scalar].
+    """
+    cdef unsigned long long head = make_simd_head(opcode, (cmp_type << 18) | xn, 3)
+    cdef unsigned long long payload = (count << 48) | (ws << 18) | xd
+    return [head, payload, scalar_bits]

@@ -20,11 +20,38 @@ Example
 
 from candle_dvm.kernel import VKernelS
 from candle_dvm.ops import (
-    NDLoad, NDStore, BinaryOp, BIN_ADD, BIN_SUB, BIN_MUL, BIN_DIV,
+    NDObject, NDLoad, NDStore, BinaryOp, BIN_ADD, BIN_SUB, BIN_MUL, BIN_DIV,
     BIN_MAX, BIN_MIN,
+    BinaryScalarOp, BINS_ADD, BINS_MUL, BINS_DIV, BINS_MAX, BINS_MIN,
     UnaryOp, UNARY_SQRT, UNARY_ABS, UNARY_LOG, UNARY_EXP,
     UNARY_ROUND, UNARY_FLOOR, UNARY_CEIL, UNARY_TRUNC, UNARY_ISFINITE,
+    CompareOp, CompareScalarOp,
+    CMP_EQ, CMP_NE, CMP_GT, CMP_GE, CMP_LT, CMP_LE,
 )
+
+# Mapping from tensor-tensor BinaryType to scalar BinarySOpType
+_BIN_TO_BINS = {
+    BIN_ADD: BINS_ADD,
+    BIN_MUL: BINS_MUL,
+    BIN_DIV: BINS_DIV,
+    BIN_MAX: BINS_MAX,
+    BIN_MIN: BINS_MIN,
+}
+
+# Commutative ops allow scalar on the left (swap to tensor-right-scalar)
+_COMMUTATIVE_OPS = frozenset({BIN_ADD, BIN_MUL, BIN_MAX, BIN_MIN})
+
+# Scalar-left rewrite rules for compare ops:
+# - symmetric ops (eq, ne): just swap operands
+# - ordered ops: flip the comparison direction
+_CMP_SCALAR_LEFT_REWRITE = {
+    CMP_EQ: CMP_EQ,
+    CMP_NE: CMP_NE,
+    CMP_GT: CMP_LT,
+    CMP_GE: CMP_LE,
+    CMP_LT: CMP_GT,
+    CMP_LE: CMP_GE,
+}
 
 
 cdef class Kernel:
@@ -97,24 +124,72 @@ cdef class Kernel:
         self._output_count += 1
         return node
 
-    cpdef object add(self, object a, object b):
-        """Create an element-wise add node.
+    cdef object _binary_dispatch(self, int bin_op, object a, object b):
+        """Route a binary op to BinaryOp or BinaryScalarOp as appropriate.
 
         Parameters
         ----------
-        a : NDObject
+        bin_op : int
+            BinaryType enum (e.g. BIN_ADD).
+        a, b : NDObject or scalar (int/float)
+            Operands.
+
+        Returns
+        -------
+        NDObject
+            The created binary node, already appended to the kernel.
+
+        Raises
+        ------
+        TypeError
+            If both operands are scalars.
+        NotImplementedError
+            If a scalar appears on the left for a non-commutative op.
+        """
+        cdef bint a_is_tensor = isinstance(a, NDObject)
+        cdef bint b_is_tensor = isinstance(b, NDObject)
+
+        if not a_is_tensor and not b_is_tensor:
+            raise TypeError(
+                "Both operands are scalars; at least one must be a tensor"
+            )
+
+        cdef object node
+        if a_is_tensor and b_is_tensor:
+            node = BinaryOp(bin_op, a, b)
+        elif a_is_tensor and not b_is_tensor:
+            # tensor op scalar  ->  BinaryScalarOp(BINS_*, tensor, scalar)
+            node = BinaryScalarOp(_BIN_TO_BINS[bin_op], a, float(b))
+        else:
+            # scalar op tensor  (a is scalar, b is tensor)
+            if bin_op not in _COMMUTATIVE_OPS:
+                raise NotImplementedError(
+                    f"scalar-left not supported for non-commutative op {bin_op}"
+                )
+            # Commutative: swap so tensor is first
+            node = BinaryScalarOp(_BIN_TO_BINS[bin_op], b, float(a))
+
+        self._kernel.append(node)
+        return node
+
+    cpdef object add(self, object a, object b):
+        """Create an element-wise add node.
+
+        Accepts tensor-tensor, tensor-scalar, or scalar-tensor (commutative).
+
+        Parameters
+        ----------
+        a : NDObject or scalar
             Left-hand operand.
-        b : NDObject
+        b : NDObject or scalar
             Right-hand operand.
 
         Returns
         -------
-        BinaryOp
+        BinaryOp or BinaryScalarOp
             The created add node, already appended to the kernel.
         """
-        cdef object node = BinaryOp(BIN_ADD, a, b)
-        self._kernel.append(node)
-        return node
+        return self._binary_dispatch(BIN_ADD, a, b)
 
     cpdef object sub(self, object a, object b):
         """Create an element-wise subtract node.
@@ -138,78 +213,79 @@ cdef class Kernel:
     cpdef object mul(self, object a, object b):
         """Create an element-wise multiply node.
 
+        Accepts tensor-tensor, tensor-scalar, or scalar-tensor (commutative).
+
         Parameters
         ----------
-        a : NDObject
+        a : NDObject or scalar
             Left-hand operand.
-        b : NDObject
+        b : NDObject or scalar
             Right-hand operand.
 
         Returns
         -------
-        BinaryOp
+        BinaryOp or BinaryScalarOp
             The created mul node, already appended to the kernel.
         """
-        cdef object node = BinaryOp(BIN_MUL, a, b)
-        self._kernel.append(node)
-        return node
+        return self._binary_dispatch(BIN_MUL, a, b)
 
     cpdef object div(self, object a, object b):
         """Create an element-wise divide node.
 
+        Accepts tensor-tensor or tensor-scalar.  scalar-left raises
+        ``NotImplementedError`` because division is non-commutative.
+
         Parameters
         ----------
-        a : NDObject
+        a : NDObject or scalar
             Left-hand operand.
-        b : NDObject
+        b : NDObject or scalar
             Right-hand operand.
 
         Returns
         -------
-        BinaryOp
+        BinaryOp or BinaryScalarOp
             The created div node, already appended to the kernel.
         """
-        cdef object node = BinaryOp(BIN_DIV, a, b)
-        self._kernel.append(node)
-        return node
+        return self._binary_dispatch(BIN_DIV, a, b)
 
     cpdef object maximum(self, object a, object b):
         """Create an element-wise maximum node.
 
+        Accepts tensor-tensor, tensor-scalar, or scalar-tensor (commutative).
+
         Parameters
         ----------
-        a : NDObject
+        a : NDObject or scalar
             Left-hand operand.
-        b : NDObject
+        b : NDObject or scalar
             Right-hand operand.
 
         Returns
         -------
-        BinaryOp
+        BinaryOp or BinaryScalarOp
             The created max node, already appended to the kernel.
         """
-        cdef object node = BinaryOp(BIN_MAX, a, b)
-        self._kernel.append(node)
-        return node
+        return self._binary_dispatch(BIN_MAX, a, b)
 
     cpdef object minimum(self, object a, object b):
         """Create an element-wise minimum node.
 
+        Accepts tensor-tensor, tensor-scalar, or scalar-tensor (commutative).
+
         Parameters
         ----------
-        a : NDObject
+        a : NDObject or scalar
             Left-hand operand.
-        b : NDObject
+        b : NDObject or scalar
             Right-hand operand.
 
         Returns
         -------
-        BinaryOp
+        BinaryOp or BinaryScalarOp
             The created min node, already appended to the kernel.
         """
-        cdef object node = BinaryOp(BIN_MIN, a, b)
-        self._kernel.append(node)
-        return node
+        return self._binary_dispatch(BIN_MIN, a, b)
 
     # ---------------------------------------------------------------
     # Unary methods (Batch A)
@@ -268,6 +344,59 @@ cdef class Kernel:
         cdef object node = UnaryOp(UNARY_ISFINITE, x)
         self._kernel.append(node)
         return node
+
+    # ---------------------------------------------------------------
+    # Compare methods (Batch D)
+    # ---------------------------------------------------------------
+
+    cdef object _compare_dispatch(self, int cmp_type, object a, object b):
+        """Route a compare op to CompareOp or CompareScalarOp.
+
+        Scalar-left rewrites ordered comparisons: greater(s, x) -> less(x, s).
+        """
+        cdef bint a_is_tensor = isinstance(a, NDObject)
+        cdef bint b_is_tensor = isinstance(b, NDObject)
+
+        if not a_is_tensor and not b_is_tensor:
+            raise TypeError(
+                "Both operands are scalars; at least one must be a tensor"
+            )
+
+        cdef object node
+        if a_is_tensor and b_is_tensor:
+            node = CompareOp(cmp_type, a, b)
+        elif a_is_tensor and not b_is_tensor:
+            node = CompareScalarOp(cmp_type, a, float(b))
+        else:
+            # scalar-left: rewrite cmp_type and swap operands
+            node = CompareScalarOp(_CMP_SCALAR_LEFT_REWRITE[cmp_type], b, float(a))
+
+        self._kernel.append(node)
+        return node
+
+    cpdef object equal(self, object a, object b):
+        """Element-wise equality compare (returns bool dtype)."""
+        return self._compare_dispatch(CMP_EQ, a, b)
+
+    cpdef object not_equal(self, object a, object b):
+        """Element-wise not-equal compare (returns bool dtype)."""
+        return self._compare_dispatch(CMP_NE, a, b)
+
+    cpdef object greater(self, object a, object b):
+        """Element-wise greater-than compare (returns bool dtype)."""
+        return self._compare_dispatch(CMP_GT, a, b)
+
+    cpdef object greater_equal(self, object a, object b):
+        """Element-wise greater-or-equal compare (returns bool dtype)."""
+        return self._compare_dispatch(CMP_GE, a, b)
+
+    cpdef object less(self, object a, object b):
+        """Element-wise less-than compare (returns bool dtype)."""
+        return self._compare_dispatch(CMP_LT, a, b)
+
+    cpdef object less_equal(self, object a, object b):
+        """Element-wise less-or-equal compare (returns bool dtype)."""
+        return self._compare_dispatch(CMP_LE, a, b)
 
     cpdef void codegen(self):
         """Compile the graph into DVM bytecode.

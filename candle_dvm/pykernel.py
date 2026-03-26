@@ -33,6 +33,23 @@ _DTYPE_TO_NP = {
 }
 
 
+def _store_output_logical_numpy_dtype(store_obj):
+    """Return the public/logical numpy dtype for a store result."""
+    return _DTYPE_TO_NP.get(store_obj.type_id, np.float32)
+
+
+def _store_output_device_numpy_dtype(store_obj):
+    """Return the device-side physical numpy dtype for a store result.
+
+    Bool-producing ops may store source-dtype-sized 0/1 values on hardware even
+    though the public API returns bool arrays.
+    """
+    src = getattr(store_obj, "lhs", None)
+    if src is not None and hasattr(src, "storage_type_id"):
+        return _DTYPE_TO_NP.get(src.storage_type_id(), np.float32)
+    return _store_output_logical_numpy_dtype(store_obj)
+
+
 class PyKernel:
     """High-level kernel wrapper that manages graph build, codegen,
     device memory, and kernel launch.
@@ -101,15 +118,18 @@ class PyKernel:
 
             # ---- Step 5: allocate device buffers for outputs ----
             out_shapes = []
-            out_dtypes = []
+            out_logical_dtypes = []
+            out_device_dtypes = []
             for store_obj in self._api_kernel.outputs:
                 shape = store_obj.shape_ref
-                np_dtype = _DTYPE_TO_NP.get(store_obj.type_id, np.float32)
-                nbytes = int(np.prod(shape)) * np.dtype(np_dtype).itemsize
+                logical_np_dtype = _store_output_logical_numpy_dtype(store_obj)
+                device_np_dtype = _store_output_device_numpy_dtype(store_obj)
+                nbytes = int(np.prod(shape)) * np.dtype(device_np_dtype).itemsize
                 dev_ptr = sys.malloc_device(nbytes)
                 out_dev_ptrs.append(dev_ptr)
                 out_shapes.append(shape)
-                out_dtypes.append(np_dtype)
+                out_logical_dtypes.append(logical_np_dtype)
+                out_device_dtypes.append(device_np_dtype)
 
             # ---- Step 6: bind relocations ----
             # Relocs are emitted in object order: load0, load1, ..., store0, store1, ...
@@ -130,14 +150,19 @@ class PyKernel:
 
             # ---- Step 8: D2H copy outputs ----
             results = []
-            for i, (shape, np_dtype) in enumerate(zip(out_shapes, out_dtypes)):
-                out_arr = np.empty(shape, dtype=np_dtype)
+            for i, (shape, logical_dtype, device_dtype) in enumerate(
+                zip(out_shapes, out_logical_dtypes, out_device_dtypes)
+            ):
+                raw_arr = np.empty(shape, dtype=device_dtype)
                 sys.memcpy_d2h(
-                    out_arr.ctypes.data, out_dev_ptrs[i],
-                    out_arr.nbytes, stream,
+                    raw_arr.ctypes.data, out_dev_ptrs[i],
+                    raw_arr.nbytes, stream,
                 )
                 sys.sync_stream(stream)
-                results.append(out_arr)
+                if logical_dtype == np.bool_ and device_dtype != np.bool_:
+                    results.append(raw_arr != 0)
+                else:
+                    results.append(raw_arr.astype(logical_dtype, copy=False))
 
             return results[0] if len(results) == 1 else results
 
