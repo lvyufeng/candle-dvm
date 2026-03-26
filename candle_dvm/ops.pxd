@@ -77,3 +77,11 @@ cdef class BinaryOp(FlexOp):
 # ---------------------------------------------------------------------------
 cdef class UnaryOp(FlexOp):
     cdef public int op_type
+
+
+# ---------------------------------------------------------------------------
+# BinaryScalarOp
+# ---------------------------------------------------------------------------
+cdef class BinaryScalarOp(FlexOp):
+    cdef public int op_type
+    cdef public double scalar

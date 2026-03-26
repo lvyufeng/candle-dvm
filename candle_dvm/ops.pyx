@@ -48,8 +48,18 @@ from candle_dvm.isa import (
     V_X_MASK,
     V_C_X_BITS,
     UNARY_OPCODE_TABLE,
+    BINARY_SCALAR_OPCODE_TABLE,
 )
-from candle_dvm.isa cimport make_acc_head, make_simd_head, encode_unary
+from candle_dvm.isa import (
+    BINS_ADD as BINS_ADD,
+    BINS_MUL as BINS_MUL,
+    BINS_DIV as BINS_DIV,
+    BINS_MAX as BINS_MAX,
+    BINS_MIN as BINS_MIN,
+)
+from candle_dvm.isa cimport make_acc_head, make_simd_head, encode_unary, encode_binary_scalar
+
+import struct as _struct
 
 
 # ===================================================================
@@ -108,6 +118,7 @@ OBJ_PAD_STORE  = 4
 OBJ_STORE      = 5
 OBJ_UNARY      = 12
 OBJ_BINARY     = 14
+OBJ_BINARY_S   = 15
 
 # Instruction format constants
 # vLoad: RELOC_OFFSET=1, ROUND_OFFSET=3
@@ -640,6 +651,115 @@ cdef class UnaryOp(FlexOp):
         # Use encode_unary helper
         cdef list words = encode_unary(insn_id, <unsigned long long>self.xbuf,
                                         <unsigned long long>self.lhs.xbuf, count)
+
+        # Apply sync flags to head word
+        cdef unsigned long long head = <unsigned long long>words[0]
+        head |= (<unsigned long long>self.sync_set << V_HEAD_SET_FLAG_OFFSET)
+        head |= (<unsigned long long>self.sync_wait << V_HEAD_WAIT_FLAG_OFFSET)
+        head |= (<unsigned long long>self.sync_back_set << V_HEAD_BACK_SET_OFFSET)
+        head |= (<unsigned long long>self.sync_back_wait << V_HEAD_BACK_WAIT_OFFSET)
+        head |= (<unsigned long long>(self.sync_set_event & 0x7) << V_HEAD_SET_EVENT_OFFSET)
+        head |= (<unsigned long long>(self.sync_wait_event & 0x7) << V_HEAD_WAIT_EVENT_OFFSET)
+        head |= (<unsigned long long>(self.sync_b_set_event & 0x7) << V_HEAD_B_SET_EVENT_OFFSET)
+        head |= (<unsigned long long>(self.sync_b_wait_event & 0x7) << V_HEAD_B_WAIT_EVENT_OFFSET)
+        code.append_u64(head)
+
+        code.append_u64(<unsigned long long>words[1])
+
+
+# ===================================================================
+# Scalar bit packing helpers
+# ===================================================================
+
+cdef unsigned long long _float_to_fp32_bits(double val):
+    """Convert a Python float to raw IEEE754 32-bit bits."""
+    cdef bytes b = _struct.pack('<f', val)
+    return <unsigned long long>_struct.unpack('<I', b)[0]
+
+cdef unsigned long long _float_to_fp16_bits(double val):
+    """Convert a Python float to raw IEEE754 16-bit half bits."""
+    cdef bytes b = _struct.pack('<e', val)
+    return <unsigned long long>_struct.unpack('<H', b)[0]
+
+
+# ===================================================================
+# BinaryScalarOp -- element-wise binary with scalar (Batch C)
+# ===================================================================
+
+cdef class BinaryScalarOp(FlexOp):
+    """Element-wise binary operation with a scalar constant.
+
+    Parameters
+    ----------
+    op_type : int
+        BinarySOpType enum value (e.g. BINS_ADD).
+    src : NDObject
+        Input operand (tensor).
+    scalar : float
+        Scalar constant value.
+    """
+
+    def __init__(self, int op_type, NDObject src, double scalar):
+        super().__init__(OBJ_BINARY_S, src.type_id, src.shape_ref, src, None)
+        self.op_type = op_type
+        self.scalar = scalar
+
+    def normalize(self):
+        """Output shape = input shape.  Output dtype = input dtype."""
+        if self.lhs is None:
+            raise ValueError("BinaryScalarOp: source must not be None")
+        self.shape_ref = self.lhs.shape_ref
+        self.type_id = self.lhs.type_id
+        self.normalized = True
+
+    def emit(self, Code code, list relocs):
+        """Emit a vBinaryS instruction.
+
+        Uses vBinaryS::Encode format (2 words):
+            pc[0] = make_simd_head(opcode, xn, 2)
+            pc[1] = scalar_bits << 32 | vCompactX(xd) << 16 | count
+
+        count = nd_.stride_back() = SIMD-aligned element count.
+        """
+        cdef int ndim = len(self.shape_ref)
+        cdef int simd_width = _SIMD_WIDTH[self.lhs.type_id]
+
+        # stride_back: same calculation as BinaryOp
+        cdef list dims = []
+        cdef int i
+        for i in range(ndim):
+            dims.append(self.lhs.shape_ref[ndim - 1 - i])
+
+        cdef long long stride = _round_up(<long long>dims[0], simd_width)
+        for i in range(1, ndim):
+            stride = <long long>dims[i] * stride
+        cdef unsigned long long count = <unsigned long long>stride
+
+        # Look up instruction opcode
+        cdef tuple key = (self.op_type, self.lhs.type_id)
+        if key not in BINARY_SCALAR_OPCODE_TABLE:
+            raise NotImplementedError(
+                f"BinaryScalarOp: unsupported op_type={self.op_type}, "
+                f"dtype={self.lhs.type_id}"
+            )
+        cdef unsigned long long insn_id = <unsigned long long>BINARY_SCALAR_OPCODE_TABLE[key]
+
+        # Pack scalar bits according to dtype
+        cdef unsigned long long scalar_bits
+        if self.lhs.type_id == DTYPE_FP16:
+            scalar_bits = _float_to_fp16_bits(self.scalar)
+        else:
+            # fp32
+            scalar_bits = _float_to_fp32_bits(self.scalar)
+
+        # Use encode_binary_scalar helper
+        cdef list words = encode_binary_scalar(
+            insn_id,
+            <unsigned long long>self.lhs.xbuf,
+            <unsigned long long>self.xbuf,
+            count,
+            scalar_bits,
+        )
 
         # Apply sync flags to head word
         cdef unsigned long long head = <unsigned long long>words[0]

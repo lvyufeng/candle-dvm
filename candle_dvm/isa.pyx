@@ -441,6 +441,40 @@ BINARY_OPCODE_TABLE = {
 
 
 # ===================================================================
+# BinarySOpType constants  (dvm.h BinarySOpType enum)
+# Index into binarys_id_list[] in ops.cc; compare/ScalarDiv excluded.
+# ===================================================================
+BINS_ADD  = 6
+BINS_MUL  = 7
+BINS_DIV  = 8
+BINS_MAX  = 10
+BINS_MIN  = 11
+
+# ===================================================================
+# Binary-scalar opcode routing table
+# Maps (BinarySOpType, DataType) -> vSimdInsnID
+# Derived from ops.cc binarys_id_list[]
+# ===================================================================
+BINARY_SCALAR_OPCODE_TABLE = {
+    # add scalar
+    (BINS_ADD, DTYPE_F32):  V_ADDS,
+    (BINS_ADD, DTYPE_FP16): V_ADDS_FP16,
+    # mul scalar
+    (BINS_MUL, DTYPE_F32):  V_MULS,
+    (BINS_MUL, DTYPE_FP16): V_MULS_FP16,
+    # div scalar
+    (BINS_DIV, DTYPE_F32):  V_DIVS,
+    (BINS_DIV, DTYPE_FP16): V_DIVS_FP16,
+    # maximum scalar
+    (BINS_MAX, DTYPE_F32):  V_MAXS,
+    (BINS_MAX, DTYPE_FP16): V_MAXS_FP16,
+    # minimum scalar
+    (BINS_MIN, DTYPE_F32):  V_MINS,
+    (BINS_MIN, DTYPE_FP16): V_MINS_FP16,
+}
+
+
+# ===================================================================
 # Encode helpers
 # ===================================================================
 
@@ -544,4 +578,44 @@ cpdef list encode_unary(
     """
     cdef unsigned long long head = make_simd_head(opcode, xd, 2)
     cdef unsigned long long payload = (xn << 32) | count
+    return [head, payload]
+
+
+cpdef list encode_binary_scalar(
+    unsigned long long opcode,
+    unsigned long long xn,
+    unsigned long long xd,
+    unsigned long long count,
+    unsigned long long scalar_bits,
+):
+    """Encode a vBinaryS 2-word SIMD instruction.
+
+    Matches the upstream vBinaryS layout from isa.h:
+      pc[0] = make_simd_head(opcode, xn, 2)
+      pc[1] = scalar_bits << 32 | vCompactX(xd) << 16 | count
+
+    The ext field carries **xn** (the first source register),
+    matching vBinary convention.  The destination xd is packed
+    via ``vCompactX`` (``xd >> 5``) into the payload word.
+
+    Parameters
+    ----------
+    opcode : int
+        SIMD opcode (e.g. ``V_ADDS``).
+    xn : int
+        Source register address (26 bits, goes into ext field).
+    xd : int
+        Destination register address; stored as ``xd >> 5`` in payload.
+    count : int
+        Element count (lower 16 bits of word 1).
+    scalar_bits : int
+        Raw bit pattern of the scalar constant (upper 32 bits of word 1).
+
+    Returns
+    -------
+    list
+        Two-element list of uint64 values ``[head, payload]``.
+    """
+    cdef unsigned long long head = make_simd_head(opcode, xn, 2)
+    cdef unsigned long long payload = (scalar_bits << 32) | ((xd >> 5) << 16) | count
     return [head, payload]

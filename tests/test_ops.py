@@ -17,6 +17,8 @@ from candle_dvm.ops import (
     BIN_DIV,
     BIN_MAX,
     BIN_MIN,
+    BINS_ADD,
+    BINS_DIV,
     UNARY_ISFINITE,
     UNARY_SQRT,
     OBJ_LOAD,
@@ -26,6 +28,7 @@ from candle_dvm.ops import (
     NDStore,
     UnaryOp,
     BinaryOp,
+    BinaryScalarOp,
 )
 from candle_dvm.pass_ import run_passes
 
@@ -682,3 +685,41 @@ class TestBinaryOpBatchB:
             assert opcode == isa.SIMD_FUNC_OFFSET[isa.V_MIN_FP16]
         finally:
             code.free()
+
+
+# ===================================================================
+# BinaryScalarOp -- construction, normalize, emit (Batch C Task 3)
+# ===================================================================
+
+def test_binary_scalar_normalize_preserves_shape_and_dtype():
+    x = NDLoad(io_index=0, shape=(32, 32), dtype=DTYPE_F32)
+    op = BinaryScalarOp(op_type=BINS_ADD, src=x, scalar=1.0)
+    op.normalize()
+    assert op.shape_ref == (32, 32)
+    assert op.type_id == DTYPE_F32
+
+
+def test_binary_scalar_emit_appends_two_words():
+    x = NDLoad(io_index=0, shape=(4, 8), dtype=DTYPE_F32)
+    x.normalize(); x.xbuf = 0x200
+    op = BinaryScalarOp(op_type=BINS_ADD, src=x, scalar=1.0)
+    op.normalize(); op.xbuf = 0x400
+    code = Code(capacity=4096)
+    try:
+        op.emit(code, [])
+        assert code.size == 16
+    finally:
+        code.free()
+
+
+def test_binary_scalar_emit_raises_for_unsupported_dtype():
+    x = NDLoad(io_index=0, shape=(4, 8), dtype=DTYPE_INT32)
+    x.normalize(); x.xbuf = 0x200
+    op = BinaryScalarOp(op_type=BINS_DIV, src=x, scalar=1.0)
+    op.normalize(); op.xbuf = 0x400
+    code = Code(capacity=4096)
+    try:
+        with pytest.raises(NotImplementedError):
+            op.emit(code, [])
+    finally:
+        code.free()

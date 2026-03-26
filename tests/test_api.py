@@ -2,6 +2,7 @@
 
 from candle_dvm import Kernel, float32
 from candle_dvm.ops import DTYPE_BOOL
+import pytest
 
 
 def test_public_kernel_builds_add_graph():
@@ -118,3 +119,60 @@ def test_add_still_works():
     k.store(out)
     k.codegen()
     assert len(k.get_relocs()) == 3
+
+
+# ---------------------------------------------------------------
+# Task 4: Kernel scalar routing tests
+# ---------------------------------------------------------------
+
+def test_kernel_add_accepts_tensor_scalar():
+    k = Kernel()
+    x = k.load((32, 32), float32)
+    y = k.add(x, 1.0)
+    assert y.shape_ref == (32, 32)
+
+
+def test_kernel_mul_accepts_tensor_scalar():
+    k = Kernel()
+    x = k.load((32, 32), float32)
+    y = k.mul(x, 2.0)
+    assert y.shape_ref == (32, 32)
+
+
+def test_kernel_div_accepts_tensor_scalar():
+    k = Kernel()
+    x = k.load((32, 32), float32)
+    y = k.div(x, 2.0)
+    assert y.shape_ref == (32, 32)
+
+
+def test_kernel_maximum_accepts_tensor_scalar():
+    k = Kernel()
+    x = k.load((32, 32), float32)
+    y = k.maximum(x, 0.0)
+    assert y.shape_ref == (32, 32)
+
+
+def test_kernel_add_accepts_scalar_left_commutative():
+    k = Kernel()
+    x = k.load((32, 32), float32)
+    y = k.add(1.0, x)
+    assert y.shape_ref == (32, 32)
+
+
+def test_kernel_div_scalar_left_raises():
+    k = Kernel()
+    x = k.load((32, 32), float32)
+    with pytest.raises(NotImplementedError):
+        k.div(1.0, x)
+
+
+def test_kernel_both_scalars_raises():
+    k = Kernel()
+    with pytest.raises(TypeError):
+        k.add(1.0, 2.0)
+
+
+def test_kernel_does_not_expose_binary_dispatch():
+    k = Kernel()
+    assert not hasattr(k, "_binary_dispatch")

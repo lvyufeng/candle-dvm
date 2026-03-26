@@ -347,3 +347,63 @@ def test_maximum_minimum_with_inf():
 
     np.testing.assert_array_equal(z_max, np.maximum(x, y))
     np.testing.assert_array_equal(z_min, np.minimum(x, y))
+
+
+# -------------------------------------------------------------------
+# Batch C -- scalar binary op hardware tests
+# -------------------------------------------------------------------
+
+
+@pytest.mark.requires_910b
+def test_add_scalar_fp32_end_to_end():
+    @dvm.kernel()
+    def my_adds(k, x):
+        a = k.load(x.shape, dvm.float32)
+        return k.store(k.add(a, 1.0))
+    x = np.full([32, 32], 2.0, np.float32)
+    z = my_adds(x)
+    np.testing.assert_allclose(z, x + 1.0, rtol=1e-5, atol=1e-5)
+
+
+@pytest.mark.requires_910b
+def test_mul_scalar_fp16_end_to_end():
+    @dvm.kernel()
+    def my_muls(k, x):
+        a = k.load(x.shape, dvm.float16)
+        return k.store(k.mul(a, np.float16(2.0)))
+    x = np.full([32, 32], 3.0, np.float16)
+    z = my_muls(x)
+    np.testing.assert_allclose(z.astype(np.float32), (x * np.float16(2.0)).astype(np.float32), rtol=5e-3, atol=5e-3)
+
+
+@pytest.mark.requires_910b
+def test_div_scalar_fp32_end_to_end():
+    @dvm.kernel()
+    def my_divs(k, x):
+        a = k.load(x.shape, dvm.float32)
+        return k.store(k.div(a, 2.0))
+    x = np.full([32, 32], 6.0, np.float32)
+    z = my_divs(x)
+    np.testing.assert_allclose(z, x / 2.0, rtol=1e-5, atol=1e-5)
+
+
+@pytest.mark.requires_910b
+def test_maximum_scalar_fp32_end_to_end():
+    @dvm.kernel()
+    def my_maxs(k, x):
+        a = k.load(x.shape, dvm.float32)
+        return k.store(k.maximum(a, 0.0))
+    x = np.linspace(-5.0, 5.0, 1024).reshape(32, 32).astype(np.float32)
+    z = my_maxs(x)
+    np.testing.assert_allclose(z, np.maximum(x, 0.0), rtol=1e-5, atol=1e-5)
+
+
+@pytest.mark.requires_910b
+def test_minimum_scalar_fp16_end_to_end():
+    @dvm.kernel()
+    def my_mins(k, x):
+        a = k.load(x.shape, dvm.float16)
+        return k.store(k.minimum(a, np.float16(1.0)))
+    x = np.linspace(-2.0, 4.0, 1024).reshape(32, 32).astype(np.float16)
+    z = my_mins(x)
+    np.testing.assert_allclose(z.astype(np.float32), np.minimum(x, np.float16(1.0)).astype(np.float32), rtol=5e-3, atol=5e-3)
